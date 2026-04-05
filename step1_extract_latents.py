@@ -15,8 +15,6 @@ latents/latents_256.npy
 latents/latents_384.npy
 """
 
-import os
-import sys
 import numpy as np
 from pathlib import Path
 
