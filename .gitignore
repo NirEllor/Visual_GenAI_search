@@ -1,0 +1,17 @@
+# Large binary / generated files — do not commit
+checkpoints/
+data/
+latents/
+results/
+models/*.pt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/

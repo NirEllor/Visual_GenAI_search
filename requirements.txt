@@ -1,0 +1,23 @@
+# JAX (CPU only — used for AE checkpoint loading and encoding/decoding)
+jax[cpu]
+flax
+optax
+orbax-checkpoint
+msgpack
+
+# PyTorch (diffusion training, distillation, evaluation)
+torch
+torchvision
+
+# Utilities
+numpy
+tqdm
+matplotlib
+scipy
+Pillow
+requests
+
+# Metrics
+clean-fid
+torch-fidelity
+lpips
