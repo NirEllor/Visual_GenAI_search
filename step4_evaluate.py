@@ -85,15 +85,15 @@ def save_images(images_uint8: np.ndarray, out_dir: Path) -> None:
 def compute_fid(gen_dir: str, dataset_name: str = "cifar10") -> float:
     """Compute FID against CIFAR-10 using clean-fid."""
     try:
-        import cleanfid
-        fid = cleanfid.compute_fid(
+        from cleanfid import fid
+        score = fid.compute_fid(
             gen_dir,
             dataset_name=dataset_name,
             dataset_res=32,
             dataset_split="train",
             verbose=True,
         )
-        return float(fid)
+        return float(score)
     except ImportError:
         print("  [warning] clean-fid not installed. FID set to -1.")
         return -1.0

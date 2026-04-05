@@ -13,7 +13,6 @@ Checkpoint source:
 import os
 import urllib.request
 from urllib.error import HTTPError
-
 import jax
 import jax.numpy as jnp
 import flax.linen as nn

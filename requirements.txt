@@ -1,5 +1,5 @@
 # JAX (CPU only — used for AE checkpoint loading and encoding/decoding)
-jax[cpu]
+jax
 flax
 optax
 orbax-checkpoint
@@ -15,9 +15,8 @@ tqdm
 matplotlib
 scipy
 Pillow
-requests
 
 # Metrics
 clean-fid
-torch-fidelity
+torch_fidelity
 lpips
