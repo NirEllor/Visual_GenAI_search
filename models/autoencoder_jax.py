@@ -10,12 +10,15 @@ Checkpoint source:
   https://raw.githubusercontent.com/phlippe/saved_models/main/JAX/tutorial9/
 """
 
+import os
+import urllib.request
+from urllib.error import HTTPError
+
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
 import numpy as np
 from pathlib import Path
-import requests
 from tqdm import tqdm
 
 # ── Architecture ──────────────────────────────────────────────────────────────
@@ -93,24 +96,17 @@ C_HID = 32  # base channel width used in all Tutorial 9 checkpoints
 
 def download_checkpoints(save_dir: str = "checkpoints") -> None:
     """Download all four autoencoder checkpoints if not already present."""
-    save_dir = Path(save_dir)
-    save_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
 
-    for dim, name in CHECKPOINT_NAMES.items():
-        dest = save_dir / name
-        if dest.exists():
-            print(f"[skip] {name} already exists")
-            continue
-        url = CHECKPOINT_BASE_URL + name
-        print(f"Downloading {name} …")
-        resp = requests.get(url, stream=True)
-        resp.raise_for_status()
-        total = int(resp.headers.get("content-length", 0))
-        with open(dest, "wb") as f, tqdm(total=total, unit="B", unit_scale=True) as bar:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
-                bar.update(len(chunk))
-        print(f"  Saved to {dest}")
+    for file_name in CHECKPOINT_NAMES.values():
+        file_path = os.path.join(save_dir, file_name)
+        if not os.path.isfile(file_path):
+            file_url = CHECKPOINT_BASE_URL + file_name
+            print(f"Downloading {file_url}...")
+            try:
+                urllib.request.urlretrieve(file_url, file_path)
+            except HTTPError as e:
+                print("Something went wrong. Please contact the author with the full output including the following error:\n", e)
 
 
 def _try_load_bytes(path: Path, variables):
