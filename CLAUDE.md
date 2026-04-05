@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-This is a research project on knowledge distillation, currently in early setup. The virtual environment is in `.venv/`.
+This is a research project on knowledge distillation studying how latent space dimensionality affects the FID score of distilled diffusion models. All pipeline scripts are implemented. The virtual environment is in `.venv/`.
 
 ## Repository
 
@@ -25,7 +25,7 @@ git push
 
 - Python virtual environment: `.venv/`
 - Activate: `source .venv/Scripts/activate` (Windows/bash)
-- Install dependencies: `pip install -r requirements.txt` (once created)
+- Install dependencies: `pip install -r requirements.txt`
 - Run scripts: `python <script>.py`
 
 ---
@@ -62,16 +62,18 @@ Guided_Research/
 - Save: `latents/latents_{64,128,256,384}.npy` — shape `(50000, dim)`
 
 **Step 2 — `step2_train_teachers.py`**
-- For each latent dim, train a DDPM teacher MLP denoiser on the saved latents
-- Architecture: 4 residual blocks, hidden_dim=512, sinusoidal time embedding, T=1000 steps (cosine schedule)
-- Train 200 epochs, AdamW lr=3e-4, batch_size=256
-- Save: `models/teacher_{64,128,256,384}.pt`
+- For each latent dim, normalise latents to zero-mean unit-variance (saves `latents/latents_{dim}_norm_stats.npy`)
+- Train a DDPM teacher MLP denoiser: 4 residual blocks, hidden_dim=512, sinusoidal time embedding, T=1000 steps (cosine schedule)
+- Train 200 epochs, AdamW lr=3e-4, batch_size=256, cosine LR decay, gradient clipping
+- Save: `models/teacher_{64,128,256,384}.pt` (includes latent mean/std for later denormalisation)
 
 **Step 3 — `step3_distill_students.py`**
-- Distill each teacher into a smaller student via **progressive distillation** (Salimans & Ho 2022)
-- 1000→500→...→4 steps across 3 rounds (100 epochs/round, lr=1e-4)
+- Distill each teacher into a smaller student via a **combined loss**:
+  - `L = 0.5 · MSE(ε_student, ε_true)` (DDPM loss — student learns from data directly)
+  - `+ 0.5 · MSE(x̂₀_student, x̂₀_teacher)` (distillation loss — student matches teacher's x₀ predictions)
 - Student architecture: 2 residual blocks, hidden_dim=256 (~4x smaller than teacher)
-- Loss: MSE between student and teacher x₀-predictions in distilled step space
+- Train 150 epochs, AdamW lr=1e-4, cosine LR decay, gradient clipping
+- At inference, student uses **DDIM with 4 steps** (vs teacher's 1000-step DDPM)
 - Save: `models/student_{64,128,256,384}.pt`
 
 **Step 4 — `step4_evaluate.py`**
@@ -86,7 +88,8 @@ Guided_Research/
 - JAX/Flax used only in Steps 1 & 4; all training is in **PyTorch**
 - Bridge JAX↔PyTorch via numpy: `np.array(jax_tensor)` → `torch.from_numpy()`
 - Normalize latents to zero-mean unit-variance before diffusion training
-- Checkpoint loading: try `orbax.checkpoint` first, fallback to `flax.training.checkpoints`
+- Checkpoint loading: try msgpack bytes first, then orbax, then legacy `flax.training.checkpoints`
+- Checkpoint downloading: uses `urllib.request.urlretrieve` (stdlib, no extra dependency)
 
 ### Execution Order
 
@@ -104,5 +107,4 @@ python step4_evaluate.py             # ~30 min
 |------|-----------|
 | JAX AE architecture mismatch | Inspect checkpoint keys with `jax.tree_util.tree_map` |
 | Latent scale mismatch | Normalize latents before training |
-| Progressive distillation instability | Use EMA of teacher; clip gradients |
-| Flax checkpoint format varies | Try orbax first, fallback to legacy |
+| Flax checkpoint format varies | Try msgpack bytes → orbax → legacy flax checkpoints |
