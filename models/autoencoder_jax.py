@@ -37,26 +37,32 @@ class Encoder(nn.Module):
         x = nn.gelu(x)
         x = nn.Conv(2 * self.c_hid, kernel_size=(3, 3))(x)               # (B,8,8,2*c_hid)
         x = nn.gelu(x)
-        x = x.reshape(x.shape[0], -1)                                     # (B, 8*8*2*c_hid)
+        x = nn.Conv(2 * self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)  # (B,4,4,2*c_hid)
+        x = nn.gelu(x)
+        x = x.reshape(x.shape[0], -1)                                     # (B, 4*4*2*c_hid)
         x = nn.Dense(self.latent_dim)(x)                                  # (B, latent_dim)
         return x
 
 
 class Decoder(nn.Module):
+    c_out: int
     c_hid: int
-    c_out: int = 3
+    latent_dim: int  # kept for checkpoint key compatibility, unused in forward pass
 
     @nn.compact
-    def __call__(self, z):
-        # z: (B, latent_dim)
-        x = nn.Dense(2 * self.c_hid * 8 * 8)(z)                          # (B, 8192) for c_hid=32 → 4096
+    def __call__(self, x):
+        x = nn.Dense(2 * 16 * self.c_hid)(x)                             # (B, 32*c_hid)
         x = nn.gelu(x)
-        x = x.reshape(x.shape[0], 8, 8, 2 * self.c_hid)                  # (B, 8, 8, 2*c_hid)
-        x = nn.ConvTranspose(self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)  # (B,16,16,c_hid)
+        x = x.reshape(x.shape[0], 4, 4, -1)                              # (B, 4, 4, 2*c_hid)
+        x = nn.ConvTranspose(2 * self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)  # (B,8,8,2*c_hid)
+        x = nn.gelu(x)
+        x = nn.Conv(2 * self.c_hid, kernel_size=(3, 3))(x)               # (B,8,8,2*c_hid)
+        x = nn.gelu(x)
+        x = nn.ConvTranspose(self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)      # (B,16,16,c_hid)
         x = nn.gelu(x)
         x = nn.Conv(self.c_hid, kernel_size=(3, 3))(x)                   # (B,16,16,c_hid)
         x = nn.gelu(x)
-        x = nn.ConvTranspose(self.c_out, kernel_size=(3, 3), strides=(2, 2))(x)  # (B,32,32,3)
+        x = nn.ConvTranspose(self.c_out, kernel_size=(3, 3), strides=(2, 2))(x)      # (B,32,32,c_out)
         x = nn.tanh(x)
         return x
 
@@ -67,7 +73,7 @@ class Autoencoder(nn.Module):
 
     def setup(self):
         self.encoder = Encoder(c_hid=self.c_hid, latent_dim=self.latent_dim)
-        self.decoder = Decoder(c_hid=self.c_hid)
+        self.decoder = Decoder(c_hid=self.c_hid, latent_dim=self.latent_dim, c_out=3)
 
     def __call__(self, x):
         return self.decoder(self.encoder(x))
