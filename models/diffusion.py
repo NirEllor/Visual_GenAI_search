@@ -13,7 +13,6 @@ spatial structure is assumed.
 
 import math
 import torch
-import torch.nn.functional as F
 
 
 # ── Noise schedule ────────────────────────────────────────────────────────────
