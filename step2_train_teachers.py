@@ -51,7 +51,7 @@ LOG_INTERVAL = 10            # print loss every N batches
 def get_device(dim: int = None) -> str:
     if torch.cuda.is_available():
         if dim is not None:
-            gpu_id = LATENT_DIMS.index(dim)
+            gpu_id = LATENT_DIMS.index(dim) % torch.cuda.device_count()
             return f"cuda:{gpu_id}"
         return "cuda"
     return "cpu"
