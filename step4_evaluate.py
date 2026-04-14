@@ -1,9 +1,10 @@
 """
 Step 4 — Generate images, compute metrics, and plot FID vs latent dim.
-Split into two phases:
-  --generate-only : PyTorch only, saves z_orig_{dim}.npy to results/
-  --dim           : JAX only, loads z_orig, decodes, computes FID/IS
-  --plot-only     : merges JSONs and plots
+Split into four phases:
+  --generate-only DIM : PyTorch only, saves z_orig_{dim}.npy
+  --decode-only DIM   : JAX only, decodes latents to images
+  --metrics-only DIM  : PyTorch only, computes FID/IS on saved images
+  --plot-only         : merges JSONs and plots
 """
 
 import argparse
@@ -72,8 +73,8 @@ def generate_only(dim: int) -> None:
 
 # ── phase 2: JAX only ─────────────────────────────────────────────────────────
 
-def decode_and_evaluate(dim: int) -> None:
-    """Load saved latents, decode with JAX, compute FID/IS. JAX + NumPy>=2."""
+def decode_only(dim: int) -> None:
+    """Decode latents to images using JAX autoencoder. JAX + NumPy>=2 only."""
     from models.autoencoder_jax import load_autoencoder, decode_latents, CHECKPOINT_NAMES
 
     Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
@@ -86,7 +87,7 @@ def decode_and_evaluate(dim: int) -> None:
     z_orig = np.load(z_path)
     print(f"[decode] dim={dim} latents shape: {z_orig.shape}")
 
-    ckpt_path  = Path(CKPT_DIR) / CHECKPOINT_NAMES[dim]
+    ckpt_path = Path(CKPT_DIR) / CHECKPOINT_NAMES[dim]
     ae_model, ae_params = load_autoencoder(str(ckpt_path), latent_dim=dim)
 
     print("  Decoding latents → pixel images …")
@@ -99,6 +100,17 @@ def decode_and_evaluate(dim: int) -> None:
         Image.fromarray(img).save(gen_dir / f"{i:05d}.png")
     print(f"  Images saved → {gen_dir}/")
 
+
+# ── phase 3: PyTorch only ─────────────────────────────────────────────────────
+
+def metrics_only(dim: int) -> None:
+    """Compute FID/IS on saved images. PyTorch only."""
+    gen_dir = Path(RESULTS_DIR) / f"generated_{dim}"
+    if not gen_dir.exists():
+        print(f"[ERROR] {gen_dir} not found — run --decode-only first.")
+        return
+
+    print(f"[metrics] dim={dim}")
     print("  Computing FID …")
     fid = compute_fid(str(gen_dir))
     print(f"  FID = {fid:.2f}")
@@ -113,13 +125,14 @@ def decode_and_evaluate(dim: int) -> None:
     print(f"  Metrics saved → {dim_metrics_path}")
 
 
-# ── metrics ───────────────────────────────────────────────────────────────────
+# ── metrics helpers ───────────────────────────────────────────────────────────
 
 def compute_fid(gen_dir: str) -> float:
     try:
         from cleanfid import fid
         return float(fid.compute_fid(gen_dir, dataset_name="cifar10",
-                                     dataset_res=32, dataset_split="train", verbose=True))
+                                     dataset_res=32, dataset_split="train",
+                                     verbose=True))
     except ImportError:
         print("  [warning] clean-fid not installed.")
         return -1.0
@@ -135,7 +148,7 @@ def compute_inception_score(gen_dir: str) -> float:
         return -1.0
 
 
-# ── plot ──────────────────────────────────────────────────────────────────────
+# ── phase 4: plot ─────────────────────────────────────────────────────────────
 
 def plot_only() -> None:
     Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
@@ -155,9 +168,9 @@ def plot_only() -> None:
     with open(Path(RESULTS_DIR) / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
-    valid_dims  = [d for d in LATENT_DIMS if d in metrics]
-    fid_scores  = [metrics[d]["fid"] for d in valid_dims]
-    is_scores   = [metrics[d]["is"]  for d in valid_dims]
+    valid_dims = [d for d in LATENT_DIMS if d in metrics]
+    fid_scores = [metrics[d]["fid"] for d in valid_dims]
+    is_scores  = [metrics[d]["is"]  for d in valid_dims]
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     axes[0].plot(valid_dims, fid_scores, marker="o", linewidth=2, color="royalblue")
@@ -183,22 +196,26 @@ def plot_only() -> None:
 def main():
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--generate-only", type=int, choices=LATENT_DIMS,
-                       metavar="DIM", help="Phase 1: generate latents (PyTorch). Saves z_orig_{dim}.npy")
-    group.add_argument("--dim", type=int, choices=LATENT_DIMS,
-                       help="Phase 2: decode + FID/IS (JAX). Needs z_orig_{dim}.npy from phase 1.")
+    group.add_argument("--generate-only", type=int, choices=LATENT_DIMS, metavar="DIM",
+                       help="Phase 1: generate latents (PyTorch). Saves z_orig_{dim}.npy")
+    group.add_argument("--decode-only", type=int, choices=LATENT_DIMS, metavar="DIM",
+                       help="Phase 2: decode latents to images (JAX). Needs z_orig_{dim}.npy")
+    group.add_argument("--metrics-only", type=int, choices=LATENT_DIMS, metavar="DIM",
+                       help="Phase 3: compute FID/IS (PyTorch). Needs generated_{dim}/")
     group.add_argument("--plot-only", action="store_true",
-                       help="Merge JSONs and plot. No GPU needed.")
+                       help="Phase 4: merge JSONs and plot.")
     args = parser.parse_args()
 
     if args.generate_only is not None:
         generate_only(args.generate_only)
-    elif args.dim is not None:
-        decode_and_evaluate(args.dim)
+    elif args.decode_only is not None:
+        decode_only(args.decode_only)
+    elif args.metrics_only is not None:
+        metrics_only(args.metrics_only)
     elif args.plot_only:
         plot_only()
     else:
-        print("Specify --generate-only DIM, --dim DIM, or --plot-only")
+        print("Specify --generate-only, --decode-only, --metrics-only, or --plot-only")
 
 
 if __name__ == "__main__":
