@@ -17,6 +17,7 @@ Requirements
 pip install clean-fid torch-fidelity lpips
 """
 
+import argparse
 import json
 import numpy as np
 from pathlib import Path
@@ -43,8 +44,13 @@ RESULTS_DIR        = "results"
 
 # ── utilities ─────────────────────────────────────────────────────────────────
 
-def get_device() -> str:
-    return "cuda" if torch.cuda.is_available() else "cpu"
+def get_device(dim: int = None) -> str:
+    if torch.cuda.is_available():
+        if dim is not None:
+            gpu_id = LATENT_DIMS.index(dim)
+            return f"cuda:{gpu_id}"
+        return "cuda"
+    return "cpu"
 
 
 def generate_latents(
@@ -186,81 +192,106 @@ def plot_results(dims: list, metrics: dict, out_path: str) -> None:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
-def main():
-    from models.autoencoder_jax import (
-        load_autoencoder, decode_latents, CHECKPOINT_NAMES
-    )
+def evaluate_dim(dim: int, device: str) -> None:
+    """Evaluate a single latent dim: generate, decode, save images, compute metrics."""
+    from models.autoencoder_jax import load_autoencoder, decode_latents, CHECKPOINT_NAMES
 
-    device = get_device()
-    print(f"Device: {device}")
     Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
+    print(f"\n{'='*60}")
+    print(f"  Evaluating student  latent_dim = {dim}  device = {device}")
+
+    student_path = Path(MODEL_DIR) / f"student_{dim}.pt"
+    if not student_path.exists():
+        print(f"  [ERROR] {student_path} not found — run step3 first.")
+        return
+
     diffusion = DiffusionSchedule(T=1000, device=device)
-    metrics   = {}
 
+    student  = load_student(str(student_path), latent_dim=dim, device=device)
+    ckpt     = torch.load(str(student_path), map_location="cpu", weights_only=True)
+    lat_mean = float(ckpt["latent_mean"])
+    lat_std  = float(ckpt["latent_std"])
+    ddim_steps = int(ckpt.get("student_ddim_steps", STUDENT_DDIM_STEPS))
+
+    print(f"  Generating {N_SAMPLES} samples with DDIM-{ddim_steps} …")
+    z_norm = generate_latents(student, diffusion, dim, N_SAMPLES, ddim_steps, device)
+    z_orig = (z_norm * lat_std + lat_mean).astype(np.float32)
+    print(f"  Latent range: [{z_orig.min():.3f}, {z_orig.max():.3f}]")
+
+    ckpt_path = Path(CKPT_DIR) / CHECKPOINT_NAMES[dim]
+    ae_model, ae_params = load_autoencoder(str(ckpt_path), latent_dim=dim)
+
+    print("  Decoding latents → pixel images …")
+    images_uint8 = decode_latents(ae_model, ae_params, z_orig, batch_size=DECODE_BATCH)
+    print(f"  Decoded shape: {images_uint8.shape}  dtype: {images_uint8.dtype}")
+
+    gen_dir = Path(RESULTS_DIR) / f"generated_{dim}"
+    save_images(images_uint8, gen_dir)
+    print(f"  Images saved → {gen_dir}/")
+
+    print("  Computing FID …")
+    fid = compute_fid(str(gen_dir))
+    print(f"  FID = {fid:.2f}")
+
+    print("  Computing IS …")
+    is_score = compute_inception_score(str(gen_dir))
+    print(f"  IS  = {is_score:.2f}")
+
+    # Save per-dim metrics so the plot step can merge them
+    dim_metrics_path = Path(RESULTS_DIR) / f"metrics_{dim}.json"
+    with open(dim_metrics_path, "w") as f:
+        json.dump({str(dim): {"fid": fid, "is": is_score}}, f, indent=2)
+    print(f"  Metrics saved → {dim_metrics_path}")
+
+
+def plot_only() -> None:
+    """Merge per-dim metrics JSONs and produce the final plot. CPU-only."""
+    Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+    metrics = {}
     for dim in LATENT_DIMS:
-        print(f"\n{'='*60}")
-        print(f"  Evaluating student  latent_dim = {dim}")
-
-        student_path = Path(MODEL_DIR) / f"student_{dim}.pt"
-        if not student_path.exists():
-            print(f"  [ERROR] {student_path} not found — run step3 first. Skipping.")
+        p = Path(RESULTS_DIR) / f"metrics_{dim}.json"
+        if not p.exists():
+            print(f"[warning] {p} not found — skipping dim {dim}.")
             continue
+        with open(p) as f:
+            metrics[dim] = json.load(f)[str(dim)]
 
-        # Load student
-        student = load_student(str(student_path), latent_dim=dim, device=device)
-        ckpt    = torch.load(str(student_path), map_location="cpu", weights_only=True)
-        lat_mean = float(ckpt["latent_mean"])
-        lat_std  = float(ckpt["latent_std"])
-        ddim_steps = int(ckpt.get("student_ddim_steps", STUDENT_DDIM_STEPS))
+    if not metrics:
+        print("[ERROR] No per-dim metrics found. Run evaluation first.")
+        return
 
-        # ── Generate latents ──────────────────────────────────────────────
-        print(f"  Generating {N_SAMPLES} samples with DDIM-{ddim_steps} …")
-        z_norm = generate_latents(
-            student, diffusion, dim, N_SAMPLES, ddim_steps, device
-        )
-
-        # Denormalise: z_orig = z_norm * std + mean
-        z_orig = (z_norm * lat_std + lat_mean).astype(np.float32)
-        print(f"  Latent range: [{z_orig.min():.3f}, {z_orig.max():.3f}]")
-
-        # ── Decode via frozen JAX autoencoder ─────────────────────────────
-        ckpt_path = Path(CKPT_DIR) / CHECKPOINT_NAMES[dim]
-        ae_model, ae_params = load_autoencoder(str(ckpt_path), latent_dim=dim)
-
-        print("  Decoding latents → pixel images …")
-        images_uint8 = decode_latents(ae_model, ae_params, z_orig, batch_size=DECODE_BATCH)
-        print(f"  Decoded shape: {images_uint8.shape}  dtype: {images_uint8.dtype}")
-
-        # ── Save images ───────────────────────────────────────────────────
-        gen_dir = Path(RESULTS_DIR) / f"generated_{dim}"
-        save_images(images_uint8, gen_dir)
-        print(f"  Images saved → {gen_dir}/")
-
-        # ── Metrics ───────────────────────────────────────────────────────
-        print("  Computing FID …")
-        fid = compute_fid(str(gen_dir))
-        print(f"  FID = {fid:.2f}")
-
-        print("  Computing IS …")
-        is_score = compute_inception_score(str(gen_dir))
-        print(f"  IS  = {is_score:.2f}")
-
-        metrics[dim] = {"fid": fid, "is": is_score}
-
-    # ── Save metrics JSON ─────────────────────────────────────────────────────
+    # Write combined metrics.json
     metrics_path = Path(RESULTS_DIR) / "metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
-    print(f"\nMetrics saved → {metrics_path}")
+    print(f"Metrics saved → {metrics_path}")
     print(json.dumps(metrics, indent=2))
 
-    # ── Plot ──────────────────────────────────────────────────────────────────
     valid_dims = [d for d in LATENT_DIMS if d in metrics]
-    if valid_dims:
-        plot_results(valid_dims, metrics, str(Path(RESULTS_DIR) / "fid_vs_dim.png"))
-
+    plot_results(valid_dims, metrics, str(Path(RESULTS_DIR) / "fid_vs_dim.png"))
     print("\nStep 4 complete.")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--dim", type=int, choices=LATENT_DIMS, default=None,
+                       help="Evaluate a single latent dim (for parallel GPU runs). "
+                            "Saves results/metrics_{dim}.json.")
+    group.add_argument("--plot-only", action="store_true",
+                       help="Merge per-dim JSONs and plot. No GPU needed.")
+    args = parser.parse_args()
+
+    if args.plot_only:
+        plot_only()
+    elif args.dim is not None:
+        evaluate_dim(args.dim, get_device(args.dim))
+    else:
+        # Sequential fallback: evaluate all dims then plot
+        for dim in LATENT_DIMS:
+            evaluate_dim(dim, get_device())
+        plot_only()
 
 
 if __name__ == "__main__":

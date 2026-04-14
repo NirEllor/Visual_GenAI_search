@@ -103,8 +103,8 @@ python step4_evaluate.py             # ~30 min
 
 #### Parallel GPU execution (4 GPUs)
 
-Steps 2 and 3 support a `--dim` argument that pins a single latent dimension to
-`cuda:{index}` (64→0, 128→1, 256→2, 384→3). Run one process per GPU in parallel:
+Steps 2, 3, and 4 support a `--dim` argument that pins a single latent dimension
+to `cuda:{index}` (64→0, 128→1, 256→2, 384→3). Run one process per GPU in parallel:
 
 ```bash
 # Step 2 — train all 4 teachers in parallel
@@ -120,7 +120,18 @@ python step3_distill_students.py --dim 128 &
 python step3_distill_students.py --dim 256 &
 python step3_distill_students.py --dim 384 &
 wait
+
+# Step 4 — evaluate all 4 dims in parallel, then plot (CPU-only)
+python step4_evaluate.py --dim 64  &
+python step4_evaluate.py --dim 128 &
+python step4_evaluate.py --dim 256 &
+python step4_evaluate.py --dim 384 &
+wait
+python step4_evaluate.py --plot-only
 ```
+
+Each `--dim` run saves `results/metrics_{dim}.json`. `--plot-only` merges them
+into `results/metrics.json` and produces `results/fid_vs_dim.png` (no GPU needed).
 
 If fewer than 4 GPUs are available (or no CUDA), omit `--dim` to fall back to
 the sequential single-device loop.
