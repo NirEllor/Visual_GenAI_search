@@ -101,13 +101,11 @@ def train_one_epoch(
         eps_student = student(x_t, t)
         ddpm_loss   = F.mse_loss(eps_student, noise)
 
-        # ── Distillation loss (match teacher's x₀ prediction) ─────────────
+        # ── Distillation loss (match teacher's epsilon prediction directly) ────
         with torch.no_grad():
             eps_teacher = teacher(x_t, t)
-            x0_teacher  = diffusion.predict_x0_from_eps(x_t, t, eps_teacher)
 
-        x0_student  = diffusion.predict_x0_from_eps(x_t, t, eps_student)
-        dist_loss   = F.mse_loss(x0_student, x0_teacher)
+        dist_loss = F.mse_loss(eps_student, eps_teacher)
 
         # ── Combined loss ──────────────────────────────────────────────────
         loss = ALPHA * ddpm_loss + (1.0 - ALPHA) * dist_loss
