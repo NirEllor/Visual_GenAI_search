@@ -1,6 +1,6 @@
 #!/bin/bash
 EMAIL="ellorwaizner.nir@mail.huji.ac.il"
-VENV="source /cs/labs/raananf/ellorw.nir/distillation/Distillation_Research/venv/bin/activate"
+VENV="source /cs/labs/raananf/ellorw.nir/venv/bin/activate"
 DIMS=(64 128 256 384)
 
 # Step 2 — 4 parallel jobs, one per GPU per dim
