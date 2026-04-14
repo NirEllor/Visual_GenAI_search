@@ -31,16 +31,31 @@ done
 
 STEP3_DEP="afterok:$(IFS=:; echo "${STEP3_IDS[*]}")"
 
-# Step 4 — waits for all step 3
-JOB4=$(sbatch --dependency=$STEP3_DEP \
-  --mem=120G -c1 --time=13-23 --gres=gpu:4 \
-  --mail-type=ALL --mail-user=$EMAIL --job-name=step4_eval \
-  --wrap "bash -c '$VENV; python3 step4_evaluate.py'" \
+# Step 4 — 4 parallel eval jobs, one per GPU per dim, waits for all step 3
+STEP4_IDS=()
+for DIM in "${DIMS[@]}"; do
+  JOB=$(sbatch --dependency=$STEP3_DEP \
+    --mem=30G -c1 --time=13-23 --gres=gpu:1 \
+    --mail-type=ALL --mail-user=$EMAIL --job-name=step4_dim${DIM} \
+    --wrap "bash -c '$VENV; python3 step4_evaluate.py --dim $DIM'" \
+    | awk '{print $NF}')
+  echo "Submitted step4 dim=$DIM → Job ID: $JOB"
+  STEP4_IDS+=($JOB)
+done
+
+STEP4_DEP="afterok:$(IFS=:; echo "${STEP4_IDS[*]}")"
+
+# Step 4 plot — no GPU needed, just merges JSONs and plots, waits for all eval jobs
+JOB_PLOT=$(sbatch --dependency=$STEP4_DEP \
+  --mem=8G -c1 --time=0-01 --gres=gpu:0 \
+  --mail-type=ALL --mail-user=$EMAIL --job-name=step4_plot \
+  --wrap "bash -c '$VENV; python3 step4_evaluate.py --plot-only'" \
   | awk '{print $NF}')
-echo "Submitted step4 → Job ID: $JOB4"
+echo "Submitted step4_plot → Job ID: $JOB_PLOT"
 
 echo ""
 echo "Pipeline submitted:"
 echo "  step2 jobs : ${STEP2_IDS[*]}"
 echo "  step3 jobs : ${STEP3_IDS[*]}  (wait for all step2)"
-echo "  step4      : $JOB4            (waits for all step3)"
+echo "  step4 jobs : ${STEP4_IDS[*]}  (wait for all step3)"
+echo "  step4_plot : $JOB_PLOT         (wait for all step4)"
