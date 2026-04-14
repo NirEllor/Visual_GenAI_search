@@ -96,10 +96,34 @@ Guided_Research/
 ```bash
 pip install -r requirements.txt
 python step1_extract_latents.py      # ~30 min (CPU JAX encoding)
-python step2_train_teachers.py       # ~2–4 hrs (GPU)
-python step3_distill_students.py     # ~1–2 hrs (GPU)
+python step2_train_teachers.py       # ~2–4 hrs (GPU, sequential)
+python step3_distill_students.py     # ~1–2 hrs (GPU, sequential)
 python step4_evaluate.py             # ~30 min
 ```
+
+#### Parallel GPU execution (4 GPUs)
+
+Steps 2 and 3 support a `--dim` argument that pins a single latent dimension to
+`cuda:{index}` (64→0, 128→1, 256→2, 384→3). Run one process per GPU in parallel:
+
+```bash
+# Step 2 — train all 4 teachers in parallel
+python step2_train_teachers.py --dim 64  &
+python step2_train_teachers.py --dim 128 &
+python step2_train_teachers.py --dim 256 &
+python step2_train_teachers.py --dim 384 &
+wait
+
+# Step 3 — distil all 4 students in parallel
+python step3_distill_students.py --dim 64  &
+python step3_distill_students.py --dim 128 &
+python step3_distill_students.py --dim 256 &
+python step3_distill_students.py --dim 384 &
+wait
+```
+
+If fewer than 4 GPUs are available (or no CUDA), omit `--dim` to fall back to
+the sequential single-device loop.
 
 ### Pitfalls
 

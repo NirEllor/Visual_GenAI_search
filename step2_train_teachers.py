@@ -17,6 +17,7 @@ models/teacher_384.pt
 latents/latents_{dim}_norm_stats.npy   (mean, std for denormalisation)
 """
 
+import argparse
 import os
 import numpy as np
 from pathlib import Path
@@ -47,8 +48,13 @@ LOG_INTERVAL = 10            # print loss every N batches
 
 # ── utilities ─────────────────────────────────────────────────────────────────
 
-def get_device() -> str:
-    return "cuda" if torch.cuda.is_available() else "cpu"
+def get_device(dim: int = None) -> str:
+    if torch.cuda.is_available():
+        if dim is not None:
+            gpu_id = LATENT_DIMS.index(dim)
+            return f"cuda:{gpu_id}"
+        return "cuda"
+    return "cpu"
 
 
 def normalise_latents(latents: np.ndarray, dim: int):
@@ -111,13 +117,20 @@ def train_one_epoch(
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    device = get_device()
-    print(f"Device: {device}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dim", type=int, choices=LATENT_DIMS, default=None,
+                        help="Single latent dim to train (for parallel GPU runs). "
+                             "Omit to train all dims sequentially.")
+    args = parser.parse_args()
+
+    dims = [args.dim] if args.dim is not None else LATENT_DIMS
+    device = get_device(args.dim)
+    print(f"Device: {device}  |  dims: {dims}")
     Path(MODEL_DIR).mkdir(parents=True, exist_ok=True)
 
     diffusion = DiffusionSchedule(T=T, device=device)
 
-    for dim in LATENT_DIMS:
+    for dim in dims:
         out_path = Path(MODEL_DIR) / f"teacher_{dim}.pt"
         if out_path.exists():
             print(f"\n[skip] teacher_{dim}.pt already exists.")

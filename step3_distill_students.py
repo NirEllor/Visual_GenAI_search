@@ -26,6 +26,7 @@ models/student_256.pt
 models/student_384.pt
 """
 
+import argparse
 import numpy as np
 from pathlib import Path
 
@@ -56,8 +57,13 @@ MODEL_DIR          = "models"
 
 # ── utilities ─────────────────────────────────────────────────────────────────
 
-def get_device() -> str:
-    return "cuda" if torch.cuda.is_available() else "cpu"
+def get_device(dim: int = None) -> str:
+    if torch.cuda.is_available():
+        if dim is not None:
+            gpu_id = LATENT_DIMS.index(dim)
+            return f"cuda:{gpu_id}"
+        return "cuda"
+    return "cpu"
 
 
 def load_latents_normalised(dim: int):
@@ -132,13 +138,20 @@ def train_one_epoch(
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    device = get_device()
-    print(f"Device: {device}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dim", type=int, choices=LATENT_DIMS, default=None,
+                        help="Single latent dim to distil (for parallel GPU runs). "
+                             "Omit to distil all dims sequentially.")
+    args = parser.parse_args()
+
+    dims = [args.dim] if args.dim is not None else LATENT_DIMS
+    device = get_device(args.dim)
+    print(f"Device: {device}  |  dims: {dims}")
     Path(MODEL_DIR).mkdir(parents=True, exist_ok=True)
 
     diffusion = DiffusionSchedule(T=T, device=device)
 
-    for dim in LATENT_DIMS:
+    for dim in dims:
         out_path = Path(MODEL_DIR) / f"student_{dim}.pt"
         if out_path.exists():
             print(f"\n[skip] student_{dim}.pt already exists.")
