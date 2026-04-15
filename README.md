@@ -242,6 +242,61 @@ Credit: [Philip Lippe — UvA Deep Learning Tutorials](https://uvadlc-notebooks.
 
 ---
 
+## Productionisation Roadmap
+
+While this repository focuses on research, the pipeline is designed to evolve into a fully deployed product. The planned production stack is outlined below.
+
+### Backend API
+
+A REST/gRPC backend will wrap the inference pipeline and expose it as a service:
+
+- **Framework:** FastAPI (Python) — serves generation requests, returns image URLs or base64-encoded outputs
+- **Inference endpoint:** accepts a latent dimension and optional prompt/seed, runs the 4-step DDIM student model, decodes via the frozen autoencoder, and returns the generated image
+- **Model serving:** models loaded once at startup and kept in GPU memory; ONNX export or TorchScript compilation for lower latency
+- **Request queue:** Celery + Redis for async job handling when GPU throughput is limited
+
+### Deployment
+
+- **Containerisation:** Docker image bundling the FastAPI app, model checkpoints, and CUDA runtime
+- **Orchestration:** Kubernetes (EKS on AWS) for auto-scaling inference pods based on request load
+- **CI/CD:** GitHub Actions pipeline — linting, unit tests, Docker build, and push to ECR on every merge to `main`
+
+### AWS Infrastructure
+
+| Service | Role |
+|---|---|
+| **EC2 / EKS** | GPU inference nodes (g4dn or g5 instances) |
+| **S3** | Model checkpoint storage, generated image storage |
+| **ECR** | Docker image registry |
+| **CloudFront** | CDN for serving generated images at low latency |
+| **SQS** | Decoupled job queue for batch generation requests |
+| **CloudWatch** | Metrics, logging, and alerting for inference latency and error rates |
+| **IAM** | Least-privilege roles for each service component |
+
+### Monitoring & Observability
+
+- Prometheus + Grafana dashboards for GPU utilisation, inference latency (p50/p95/p99), and throughput
+- Structured JSON logging shipped to CloudWatch Logs
+- Alerts on latency regressions or error rate spikes
+
+### Frontend (Planned)
+
+A lightweight web UI allowing users to select a latent dimension, trigger generation, and compare outputs side-by-side across model variants — enabling non-technical stakeholders to explore the research results interactively.
+
+---
+
+## Pretrained Autoencoder Checkpoints
+
+Checkpoints are downloaded automatically in Step 1 from:
+
+```
+https://raw.githubusercontent.com/phlippe/saved_models/main/JAX/tutorial9/cifar10_{dim}.ckpt
+```
+
+Credit: [Philip Lippe — UvA Deep Learning Tutorials](https://uvadlc-notebooks.readthedocs.io/)
+
+---
+
 ## License
 
 This project is for academic research purposes.
