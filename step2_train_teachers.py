@@ -35,7 +35,7 @@ from models.denoiser import TeacherDenoiser, param_count
 # ── hyper-parameters ──────────────────────────────────────────────────────────
 LATENT_DIMS  = [64, 128, 256, 384]
 T            = 1000          # diffusion timesteps
-EPOCHS       = 200
+EPOCHS       = 500
 BATCH_SIZE   = 256
 LR           = 3e-4
 WEIGHT_DECAY = 1e-4
