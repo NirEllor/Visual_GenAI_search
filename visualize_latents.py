@@ -124,30 +124,22 @@ def draw_panel(ax: plt.Axes, xy: np.ndarray, labels: np.ndarray, title: str) -> 
     ax.set_aspect("equal", adjustable="datalim")
 
 
-# ── main ─────────────────────────────────────────────────────────────────────
+# ── core logic (importable) ───────────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Visualise latent space distributions in 2D."
-    )
-    parser.add_argument(
-        "--method", choices=["pca", "tsne", "umap"], default="pca",
-        help="Dimensionality-reduction method (default: pca).",
-    )
-    parser.add_argument(
-        "--n-samples", type=int, default=5000,
-        help="Points to sample per space (default 5000; use fewer for faster t-SNE).",
-    )
-    parser.add_argument(
-        "--dims", type=int, nargs="+", default=None,
-        help="Latent dims to include (default: all with a saved .npy file).",
-    )
-    args = parser.parse_args()
+def run(method: str = "pca", n_samples: int = 5000, dims: list = None) -> None:
+    """
+    Generate and save the latent-space 2D visualisation.
 
+    Parameters
+    ----------
+    method    : 'pca' | 'tsne' | 'umap'
+    n_samples : number of points to sample per space
+    dims      : latent dims to include (default: all with a saved .npy file)
+    """
     Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
     # ── which dims are available ───────────────────────────────────────────────
-    candidate_dims = args.dims or LATENT_DIMS
+    candidate_dims = dims or LATENT_DIMS
     dims_to_plot = []
     for d in candidate_dims:
         p = Path(LATENT_DIR) / f"latents_{d}.npy"
@@ -157,22 +149,21 @@ def main():
             print(f"  [skip] latents_{d}.npy not found — run step1 first.")
 
     if not dims_to_plot:
-        print("No latent files found. Run step1_extract_latents.py first.")
+        print("No latent files found. Skipping latent space visualisation.")
         return
 
-    # ── shared sample indices (same rows across all spaces for fair comparison) ─
+    # ── shared sample indices ─────────────────────────────────────────────────
     print("Loading CIFAR-10 labels...")
-    labels_full = load_cifar10_labels(DATA_DIR)   # (50000,)
+    labels_full = load_cifar10_labels(DATA_DIR)
     N = len(labels_full)
     rng = np.random.default_rng(0)
-    idx = rng.choice(N, size=min(args.n_samples, N), replace=False)
+    idx = rng.choice(N, size=min(n_samples, N), replace=False)
     labels = labels_full[idx]
 
-    print(f"Method: {args.method.upper()}  |  Samples per space: {len(idx)}")
+    print(f"Method: {method.upper()}  |  Samples per space: {len(idx)}")
 
     # ── figure layout ─────────────────────────────────────────────────────────
-    # +1 panel for pixel space
-    n_panels = len(dims_to_plot) + 1
+    n_panels = len(dims_to_plot) + 1   # +1 for pixel space
     n_cols   = min(4, n_panels)
     n_rows   = (n_panels + n_cols - 1) // n_cols
 
@@ -187,11 +178,9 @@ def main():
     # ── pixel space ───────────────────────────────────────────────────────────
     print("\n[pixel space]  3072D")
     pixels = load_pixel_space(DATA_DIR)[idx]
-    xy_px  = reduce_2d(pixels, args.method)
-    draw_panel(
-        axes_flat[panel], xy_px, labels,
-        f"Pixel Space  (3072D → 2D  {args.method.upper()})",
-    )
+    xy_px  = reduce_2d(pixels, method)
+    draw_panel(axes_flat[panel], xy_px, labels,
+               f"Pixel Space  (3072D → 2D  {method.upper()})")
     panel += 1
     del pixels, xy_px
 
@@ -199,11 +188,9 @@ def main():
     for d in dims_to_plot:
         print(f"[latent  dim={d}]  {d}D")
         latents = np.load(Path(LATENT_DIR) / f"latents_{d}.npy")[idx]
-        xy      = reduce_2d(latents, args.method)
-        draw_panel(
-            axes_flat[panel], xy, labels,
-            f"Latent  dim={d}  ({d}D → 2D  {args.method.upper()})",
-        )
+        xy      = reduce_2d(latents, method)
+        draw_panel(axes_flat[panel], xy, labels,
+                   f"Latent  dim={d}  ({d}D → 2D  {method.upper()})")
         panel += 1
         del latents, xy
 
@@ -213,30 +200,47 @@ def main():
 
     # ── shared legend ─────────────────────────────────────────────────────────
     legend_handles = [
-        plt.Line2D(
-            [0], [0], marker="o", color="w",
-            markerfacecolor=PALETTE[i], markersize=8,
-            label=CIFAR10_CLASSES[i],
-        )
+        plt.Line2D([0], [0], marker="o", color="w",
+                   markerfacecolor=PALETTE[i], markersize=8,
+                   label=CIFAR10_CLASSES[i])
         for i in range(10)
     ]
-    fig.legend(
-        handles=legend_handles,
-        loc="lower center", ncol=5, fontsize=9,
-        frameon=False, bbox_to_anchor=(0.5, -0.03),
-    )
+    fig.legend(handles=legend_handles, loc="lower center", ncol=5,
+               fontsize=9, frameon=False, bbox_to_anchor=(0.5, -0.03))
 
     fig.suptitle(
         f"Latent Space Distribution — 2D Projection  "
-        f"({args.method.upper()}, n={len(idx)} per space)",
+        f"({method.upper()}, n={len(idx)} per space)",
         fontsize=13, fontweight="bold", y=1.01,
     )
     plt.tight_layout()
 
-    out = Path(RESULTS_DIR) / f"latent_space_2d_{args.method}.png"
+    out = Path(RESULTS_DIR) / f"latent_space_2d_{method}.png"
     plt.savefig(str(out), dpi=150, bbox_inches="tight")
     plt.close()
     print(f"\nSaved → {out}")
+
+
+# ── CLI entry point ───────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Visualise latent space distributions in 2D."
+    )
+    parser.add_argument(
+        "--method", choices=["pca", "tsne", "umap"], default="pca",
+        help="Dimensionality-reduction method (default: pca).",
+    )
+    parser.add_argument(
+        "--n-samples", type=int, default=5000,
+        help="Points to sample per space (default 5000).",
+    )
+    parser.add_argument(
+        "--dims", type=int, nargs="+", default=None,
+        help="Latent dims to include (default: all with a saved .npy file).",
+    )
+    args = parser.parse_args()
+    run(method=args.method, n_samples=args.n_samples, dims=args.dims)
 
 
 if __name__ == "__main__":

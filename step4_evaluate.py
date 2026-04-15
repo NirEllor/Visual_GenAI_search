@@ -188,6 +188,15 @@ def plot_only() -> None:
     plt.tight_layout()
     plt.savefig(str(Path(RESULTS_DIR) / "fid_vs_dim.png"), dpi=150)
     print("Plot saved → results/fid_vs_dim.png")
+
+    # ── latent space 2D visualisation ─────────────────────────────────────────
+    try:
+        from visualize_latents import run as visualize_latents
+        print("\n[phase 4] Generating latent space 2D visualisation (PCA) …")
+        visualize_latents(method="pca", n_samples=5000)
+    except Exception as e:
+        print(f"[warning] Latent space visualisation skipped: {e}")
+
     print("\nStep 4 complete.")
 
 
