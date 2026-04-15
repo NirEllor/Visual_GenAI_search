@@ -4,19 +4,19 @@ VENV="source /cs/labs/raananf/ellorw.nir/venv/bin/activate"
 VENV_JAX="source /cs/labs/raananf/ellorw.nir/venv_jax/bin/activate"
 DIMS=(64 128 256 384)
 
-# Step 3 — distill students (PyTorch venv, 1 GPU per dim)
-STEP3_IDS=()
-for DIM in "${DIMS[@]}"; do
-  JOB=$(sbatch \
-    --mem=30G -c1 --time=13-23 --gres=gpu:1 \
-    --mail-type=ALL --mail-user=$EMAIL --job-name=step3_dim${DIM} \
-    --wrap "bash -c '$VENV; python3 step3_distill_students.py --dim $DIM'" \
-    | awk '{print $NF}')
-  echo "Submitted step3 dim=$DIM → Job ID: $JOB"
-  STEP3_IDS+=($JOB)
-done
+## Step 3 — distill students (PyTorch venv, 1 GPU per dim)
+#STEP3_IDS=()
+#for DIM in "${DIMS[@]}"; do
+#  JOB=$(sbatch \
+#    --mem=30G -c1 --time=13-23 --gres=gpu:1 \
+#    --mail-type=ALL --mail-user=$EMAIL --job-name=step3_dim${DIM} \
+#    --wrap "bash -c '$VENV; python3 step3_distill_students.py --dim $DIM'" \
+#    | awk '{print $NF}')
+#  echo "Submitted step3 dim=$DIM → Job ID: $JOB"
+#  STEP3_IDS+=($JOB)
+#done
 
-STEP3_DEP="afterok:$(IFS=:; echo "${STEP3_IDS[*]}")"
+#STEP3_DEP="afterok:$(IFS=:; echo "${STEP3_IDS[*]}")"
 
 # Step 4a — generate latents (PyTorch venv, 1 GPU per dim)
 STEP4A_IDS=()
