@@ -13,6 +13,7 @@ latents/latents_{dim}.npy   shape (50000, dim)
 """
 
 import argparse
+import os
 import numpy as np
 from pathlib import Path
 
@@ -38,20 +39,25 @@ CHECKPOINT_NAMES = {
 
 
 def get_cifar10_numpy() -> np.ndarray:
-    transform = T.Compose([T.ToTensor()])
-    dataset = torchvision.datasets.CIFAR10(
-        root=DATA_DIR, train=True, download=True, transform=transform
-    )
-    loader = torch.utils.data.DataLoader(
-        dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2
-    )
-    all_images = []
-    for imgs, _ in loader:
-        imgs = imgs.permute(0, 2, 3, 1).numpy()
-        imgs = (imgs * 2.0) - 1.0
-        all_images.append(imgs)
-    return np.concatenate(all_images, axis=0).astype(np.float32)
+    import pickle
+    # Download without transforms
+    import torchvision
+    torchvision.datasets.CIFAR10(root=DATA_DIR, train=True, download=True, transform=None)
 
+    cifar_dir = os.path.join(DATA_DIR, 'cifar-10-batches-py')
+
+    def load_batch(path):
+        with open(path, 'rb') as f:
+            d = pickle.load(f, encoding='latin1')
+        return d['data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
+
+    batches = []
+    for i in range(1, 6):
+        batches.append(load_batch(os.path.join(cifar_dir, f'data_batch_{i}')))
+
+    imgs = np.concatenate(batches, axis=0).astype(np.float32)
+    imgs = (imgs / 127.5) - 1.0  # [0,255] → [-1,1]
+    return imgs
 
 def main():
     parser = argparse.ArgumentParser()
