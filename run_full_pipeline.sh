@@ -8,7 +8,7 @@ DIMS=(8 16 32 64 128 256 384)
 STEP0_IDS=()
 for DIM in 8 16 32; do
   JOB=$(sbatch \
-    --mem=30G -c1 --time=13-23 --gres=gpu:1 \
+    --mem=90G -c1 --time=13-23 --gres=gpu:1 \
     --mail-type=ALL --mail-user=$EMAIL --job-name=step0_dim${DIM} \
     --wrap "bash -c '$VENV_JAX; python3 step0_train_autoencoder.py --dim $DIM'" \
     | awk '{print $NF}')
