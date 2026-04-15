@@ -2,12 +2,46 @@
 EMAIL="ellorwaizner.nir@mail.huji.ac.il"
 VENV="source /cs/labs/raananf/ellorw.nir/venv/bin/activate"
 VENV_JAX="source /cs/labs/raananf/ellorw.nir/venv_jax/bin/activate"
-DIMS=(64 128 256 384)
+DIMS=(8 16 32 64 128 256 384)
+
+# Step 0 — train custom autoencoders (JAX venv, 1 GPU per dim, only for new dims)
+STEP0_IDS=()
+for DIM in 8 16 32; do
+  JOB=$(sbatch \
+    --mem=30G -c1 --time=13-23 --gres=gpu:1 \
+    --mail-type=ALL --mail-user=$EMAIL --job-name=step0_dim${DIM} \
+    --wrap "bash -c '$VENV_JAX; python3 step0_train_autoencoder.py --dim $DIM'" \
+    | awk '{print $NF}')
+  echo "Submitted step0 dim=$DIM → Job ID: $JOB"
+  STEP0_IDS+=($JOB)
+done
+
+STEP0_DEP="afterok:$(IFS=:; echo "${STEP0_IDS[*]}")"
+
+# Step 1 — extract latents (JAX venv, 1 GPU per dim)
+# Only new dims need step0 dependency; existing dims can start immediately
+STEP1_IDS=()
+for DIM in "${DIMS[@]}"; do
+  if [[ "$DIM" == "8" || "$DIM" == "16" || "$DIM" == "32" ]]; then
+    DEP="--dependency=$STEP0_DEP"
+  else
+    DEP=""
+  fi
+  JOB=$(sbatch $DEP \
+    --mem=30G -c1 --time=13-23 --gres=gpu:1 \
+    --mail-type=ALL --mail-user=$EMAIL --job-name=step1_dim${DIM} \
+    --wrap "bash -c '$VENV_JAX; python3 step1_extract_latents.py --dim $DIM'" \
+    | awk '{print $NF}')
+  echo "Submitted step1 dim=$DIM → Job ID: $JOB"
+  STEP1_IDS+=($JOB)
+done
+
+STEP1_DEP="afterok:$(IFS=:; echo "${STEP1_IDS[*]}")"
 
 # Step 2 — train teachers (PyTorch venv, 1 GPU per dim)
 STEP2_IDS=()
 for DIM in "${DIMS[@]}"; do
-  JOB=$(sbatch \
+  JOB=$(sbatch --dependency=$STEP1_DEP \
     --mem=30G -c1 --time=13-23 --gres=gpu:1 \
     --mail-type=ALL --mail-user=$EMAIL --job-name=step2_dim${DIM} \
     --wrap "bash -c '$VENV; python3 step2_train_teachers.py --dim $DIM'" \
@@ -84,7 +118,9 @@ echo "Submitted step4_plot → Job ID: $JOB_PLOT"
 
 echo ""
 echo "Pipeline submitted:"
-echo "  step2 jobs  : ${STEP2_IDS[*]}"
+echo "  step0 jobs  : ${STEP0_IDS[*]}  (new dims only)"
+echo "  step1 jobs  : ${STEP1_IDS[*]}  (8,16,32 wait for step0)"
+echo "  step2 jobs  : ${STEP2_IDS[*]}  (wait for all step1)"
 echo "  step3 jobs  : ${STEP3_IDS[*]}  (wait for all step2)"
 echo "  step4a jobs : ${STEP4A_IDS[*]}  (wait for all step3)"
 echo "  step4b jobs : ${STEP4B_IDS[*]}  (wait for all step4a) — JAX venv"

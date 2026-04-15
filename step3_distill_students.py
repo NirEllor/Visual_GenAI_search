@@ -17,7 +17,7 @@ from tqdm import tqdm
 from models.diffusion import DiffusionSchedule
 from models.denoiser import TeacherDenoiser, StudentDenoiser, load_teacher, param_count
 
-LATENT_DIMS        = [64, 128, 256, 384]
+LATENT_DIMS = [8, 16, 32, 64, 128, 256, 384]
 T                  = 1000
 EPOCHS             = 700
 BATCH_SIZE         = 256

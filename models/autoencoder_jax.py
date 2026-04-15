@@ -91,6 +91,9 @@ CHECKPOINT_BASE_URL = (
     "https://raw.githubusercontent.com/phlippe/saved_models/main/JAX/tutorial9/"
 )
 CHECKPOINT_NAMES = {
+    8:   "cifar10_8_custom.ckpt",
+    16:  "cifar10_16_custom.ckpt",
+    32:  "cifar10_32_custom.ckpt",
     64:  "cifar10_64.ckpt",
     128: "cifar10_128.ckpt",
     256: "cifar10_256.ckpt",
