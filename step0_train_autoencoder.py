@@ -131,8 +131,8 @@ class Autoencoder(nn.Module):
 
 # ── training ───────────────────────────────────────────────────────────────────
 
-def mse_loss(params, model, batch):
-    recon = model.apply(params, batch)
+def mse_loss(params, apply_fn, batch):
+    recon = apply_fn(params, batch)
     return jnp.mean((recon - batch) ** 2)
 
 
@@ -173,7 +173,7 @@ def train_autoencoder(dim: int, train_imgs: np.ndarray, test_imgs: np.ndarray):
 
     N = len(train_imgs)
     best_val_loss = float("inf")
-    best_params   = params
+    best_params = state.params
 
     for epoch in tqdm(range(1, EPOCHS + 1), desc=f"dim={dim}"):
         # Shuffle
