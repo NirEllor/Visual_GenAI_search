@@ -13,6 +13,9 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from models.diffusion import DiffusionSchedule
 from models.denoiser import TeacherDenoiser, param_count
@@ -63,6 +66,21 @@ def update_ema(ema_model, model, decay=EMA_DECAY):
     with torch.no_grad():
         for ema_p, p in zip(ema_model.parameters(), model.parameters()):
             ema_p.data.mul_(decay).add_(p.data, alpha=1 - decay)
+
+
+def plot_teacher_loss(history: list, dim: int, results_dir: str = "results") -> None:
+    Path(results_dir).mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(range(1, len(history) + 1), history, color="royalblue", linewidth=1.5)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("MSE Loss")
+    ax.set_title(f"Teacher Denoiser — Training Loss  (latent_dim={dim})")
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    out = Path(results_dir) / f"teacher_loss_{dim}.png"
+    plt.savefig(str(out), dpi=150)
+    plt.close()
+    print(f"  Loss curve → {out}")
 
 
 def train_one_epoch(model, ema_model, loader, diffusion, optimizer, device, epoch):
@@ -156,6 +174,7 @@ def main():
             out_path,
         )
         print(f"  Saved → {out_path}  (best_loss={best_loss:.5f})")
+        plot_teacher_loss(history, dim)
 
     print("\nStep 2 complete.")
 

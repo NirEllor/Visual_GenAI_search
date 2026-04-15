@@ -13,6 +13,9 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from models.diffusion import DiffusionSchedule
 from models.denoiser import TeacherDenoiser, StudentDenoiser, load_teacher, param_count
@@ -40,6 +43,42 @@ def get_device(dim: int = None) -> str:
             return f"cuda:{gpu_id}"
         return "cuda"
     return "cpu"
+
+
+def plot_combined_losses(
+    teacher_history: list,
+    student_history: dict,
+    dim: int,
+    results_dir: str = "results",
+) -> None:
+    Path(results_dir).mkdir(parents=True, exist_ok=True)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Teacher subplot
+    ax1.plot(range(1, len(teacher_history) + 1), teacher_history,
+             color="royalblue", linewidth=1.5)
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("MSE Loss")
+    ax1.set_title(f"Teacher — Training Loss  (dim={dim})")
+    ax1.grid(True, alpha=0.3)
+
+    # Student subplot
+    epochs_s = range(1, len(student_history["total"]) + 1)
+    ax2.plot(epochs_s, student_history["total"],   label="Total",   color="crimson",    linewidth=1.5)
+    ax2.plot(epochs_s, student_history["ddpm"],    label="DDPM",    color="darkorange",  linewidth=1.2, linestyle="--")
+    ax2.plot(epochs_s, student_history["distill"], label="Distill", color="seagreen",    linewidth=1.2, linestyle="--")
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("MSE Loss")
+    ax2.set_title(f"Student — Training Loss  (dim={dim})")
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+    fig.suptitle(f"Training Loss Curves — latent_dim={dim}", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    out = Path(results_dir) / f"loss_curves_{dim}.png"
+    plt.savefig(str(out), dpi=150)
+    plt.close()
+    print(f"  Combined loss curve → {out}")
 
 
 def load_latents_normalised(dim: int):
@@ -136,6 +175,9 @@ def main():
         loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,
                              num_workers=2, pin_memory=(device == "cuda"))
 
+        raw_teacher_ckpt = torch.load(str(teacher_path), map_location="cpu", weights_only=False)
+        teacher_loss_history = raw_teacher_ckpt.get("loss_history", [])
+
         teacher = load_teacher(str(teacher_path), latent_dim=dim, device=device)
         teacher.eval()
         for p in teacher.parameters():
@@ -183,6 +225,7 @@ def main():
             out_path,
         )
         print(f"  Saved → {out_path}  (best_loss={best_loss:.5f})")
+        plot_combined_losses(teacher_loss_history, history, dim)
 
     print("\nStep 3 complete.")
 

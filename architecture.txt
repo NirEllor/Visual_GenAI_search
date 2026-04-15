@@ -1,0 +1,143 @@
+================================================================================
+  Architecture & Hyperparameter Reference
+  Knowledge Distillation for Latent Diffusion — CIFAR-10
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+1. AUTOENCODERS  (JAX / Flax — frozen throughout)
+────────────────────────────────────────────────────────────────────────────────
+
+Source      : UvA Deep Learning Tutorial 9 (phlippe/uvadlc_notebooks)
+Framework   : JAX + Flax linen
+Input       : CIFAR-10 images  (B, 32, 32, 3),  pixel values in [-1, 1]
+Latent dims : 8, 16, 32, 64, 128, 256, 384
+Base channels (c_hid) : 32  (same across all checkpoints)
+
+Encoder
+-------
+  Conv(c_hid,   3×3, stride=2)  → GELU        # (B, 16, 16, c_hid)
+  Conv(c_hid,   3×3, stride=1)  → GELU        # (B, 16, 16, c_hid)
+  Conv(2·c_hid, 3×3, stride=2)  → GELU        # (B,  8,  8, 2·c_hid)
+  Conv(2·c_hid, 3×3, stride=1)  → GELU        # (B,  8,  8, 2·c_hid)
+  Conv(2·c_hid, 3×3, stride=2)  → GELU        # (B,  4,  4, 2·c_hid)
+  Flatten                                       # (B, 4·4·2·c_hid = 1024)
+  Dense(latent_dim)                             # (B, latent_dim)
+
+Decoder  (mirrors encoder with transposed convolutions)
+-------
+  Dense(2·16·c_hid)             → GELU        # (B, 1024)
+  Reshape                                       # (B, 4, 4, 2·c_hid)
+  ConvTranspose(2·c_hid, 3×3, stride=2) → GELU # (B, 8,  8,  2·c_hid)
+  Conv(2·c_hid, 3×3)            → GELU        # (B, 8,  8,  2·c_hid)
+  ConvTranspose(c_hid, 3×3, stride=2)   → GELU # (B, 16, 16, c_hid)
+  Conv(c_hid, 3×3)              → GELU        # (B, 16, 16, c_hid)
+  ConvTranspose(3, 3×3, stride=2) → tanh      # (B, 32, 32, 3)
+
+Checkpoint URLs
+  https://raw.githubusercontent.com/phlippe/saved_models/main/JAX/tutorial9/cifar10_{dim}.ckpt
+  (custom dims 8/16/32 use cifar10_{dim}_custom.ckpt)
+
+
+────────────────────────────────────────────────────────────────────────────────
+2. DIFFUSION SCHEDULE
+────────────────────────────────────────────────────────────────────────────────
+
+Type        : Cosine variance schedule (Nichol & Dhariwal, 2021)
+Timesteps T : 1000
+Offset s    : 0.008
+
+  f(t) = cos( ((t/T + s) / (1 + s)) · π/2 )²
+  ᾱ_t  = f(t) / f(0)
+  β_t  = 1 − ᾱ_t / ᾱ_{t-1},   clipped to [1e-4, 0.9999]
+
+Forward process  q(x_t | x_0) = N(√ᾱ_t · x_0,  (1 − ᾱ_t) · I)
+
+Reverse sampling
+  Teacher  : full DDPM  (1000 stochastic steps)
+  Student  : DDIM       (20 deterministic steps, η=0)
+
+Posterior q(x_{t-1} | x_t, x_0) coefficients are precomputed at init.
+
+
+────────────────────────────────────────────────────────────────────────────────
+3. DENOISER ARCHITECTURE  (PyTorch)
+────────────────────────────────────────────────────────────────────────────────
+
+Both teacher and student are MLP denoisers with the same block structure but
+different depth and width.
+
+Shared components
+-----------------
+  SinusoidalPosEmb(time_emb_dim=256)
+    → frequencies:  exp(−log(10000) · i / (half−1)),  i ∈ [0, half)
+    → output:  [sin(t·freq), cos(t·freq)]  concatenated  → (B, 256)
+
+  Time-embedding MLP
+    SinPosEmb(256) → Linear(256→256) → GELU → Linear(256→256)   → t_emb (B, 256)
+
+  ResBlock(dim, time_emb_dim)
+    x → LayerNorm → Linear(dim→dim) → GELU → + time_proj(t_emb) → Linear(dim→dim) → + x
+
+  Output head
+    LayerNorm → Linear(hidden_dim → latent_dim)   # predicts noise ε
+
+Full forward pass
+  x_t  → Linear(latent_dim → hidden_dim)
+       → N × ResBlock(hidden_dim, time_emb_dim=256)
+       → LayerNorm → Linear(hidden_dim → latent_dim)   →  ε_pred
+
+Teacher (step 2)
+  hidden_dim : 512
+  n_blocks   : 4
+  ~approx params (for latent_dim=64): ~2.7 M
+
+Student (step 3)
+  hidden_dim : 256
+  n_blocks   : 2
+  ~approx params (for latent_dim=64): ~0.7 M  (~4× fewer than teacher)
+
+
+────────────────────────────────────────────────────────────────────────────────
+4. TRAINING HYPERPARAMETERS
+────────────────────────────────────────────────────────────────────────────────
+
+Step 2 — Teacher training
+  Epochs          : 1000
+  Batch size      : 256
+  Optimizer       : AdamW  (lr=3e-4, weight_decay=1e-4)
+  LR schedule     : CosineAnnealingLR  (T_max=epochs, η_min=lr·0.01)
+  Gradient clip   : 1.0  (global norm)
+  EMA decay       : 0.9999
+  Loss            : MSE(ε_pred, ε_true)   [noise prediction]
+  Checkpoint freq : every 50 epochs (interim), final at end
+
+Step 3 — Student distillation
+  Epochs          : 700
+  Batch size      : 256
+  Optimizer       : AdamW  (lr=1e-4, weight_decay=1e-4)
+  LR schedule     : CosineAnnealingLR  (T_max=epochs, η_min=lr·0.01)
+  Gradient clip   : 1.0  (global norm)
+  EMA decay       : 0.9999
+  Loss            : α · L_DDPM  +  (1−α) · L_distill,   α=0.5
+    L_DDPM    = MSE(ε_student, ε_true)        [student learns from data]
+    L_distill = MSE(ε_student, ε_teacher)     [student matches teacher]
+  Inference steps : 20  (DDIM, η=0)
+
+Latent normalisation
+  Per-dimension: subtract global mean, divide by global std + 1e-8
+  Stats saved to latents/latents_{dim}_norm_stats.npy
+
+
+────────────────────────────────────────────────────────────────────────────────
+5. EVALUATION  (step 4)
+────────────────────────────────────────────────────────────────────────────────
+
+  Generated images : 10 000 per latent dimension
+  Sampling         : DDIM 20 steps → AE decode → uint8 [0, 255]
+  Metrics          : FID (clean-fid),  IS (torch-fidelity),  optional LPIPS
+  Output           : results/metrics_{dim}.json
+                     results/metrics.json  (merged)
+                     results/fid_vs_dim.png
+
+================================================================================
