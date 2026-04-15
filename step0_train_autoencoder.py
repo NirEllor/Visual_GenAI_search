@@ -41,29 +41,25 @@ LOG_INTERVAL = 50
 
 def get_cifar10_numpy():
     import pickle
-    import os
+
+    # Download without any transform
+    torchvision.datasets.CIFAR10(root=DATA_DIR, train=True, download=True, transform=None)
+    torchvision.datasets.CIFAR10(root=DATA_DIR, train=False, download=True, transform=None)
+
+    cifar_dir = os.path.join(DATA_DIR, 'cifar-10-batches-py')
 
     def load_batch(path):
         with open(path, 'rb') as f:
             d = pickle.load(f, encoding='latin1')
-        return d['data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)  # NHWC
-
-    # Download using torchvision (just for download, no transforms)
-    torchvision.datasets.CIFAR10(root=DATA_DIR, train=True, download=True)
-    torchvision.datasets.CIFAR10(root=DATA_DIR, train=False, download=True)
-
-    # Load raw batches directly
-    cifar_dir = os.path.join(DATA_DIR, 'cifar-10-batches-py')
+        return d['data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
 
     train_batches = []
     for i in range(1, 6):
         train_batches.append(load_batch(os.path.join(cifar_dir, f'data_batch_{i}')))
     train_imgs = np.concatenate(train_batches, axis=0).astype(np.float32) / 127.5 - 1.0
-
-    test_imgs = load_batch(os.path.join(cifar_dir, 'test_batch')).astype(np.float32) / 127.5 - 1.0
+    test_imgs  = load_batch(os.path.join(cifar_dir, 'test_batch')).astype(np.float32) / 127.5 - 1.0
 
     return train_imgs, test_imgs
-
 
 # ── model ──────────────────────────────────────────────────────────────────────
 
