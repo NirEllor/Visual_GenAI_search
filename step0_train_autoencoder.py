@@ -29,7 +29,7 @@ import torchvision.transforms as T
 # ── configuration ─────────────────────────────────────────────────────────────
 CUSTOM_DIMS  = [8, 16, 32]
 C_HID        = 32
-EPOCHS       = 200
+EPOCHS       = 500
 BATCH_SIZE   = 256
 LR           = 1e-3
 DATA_DIR     = "data"
