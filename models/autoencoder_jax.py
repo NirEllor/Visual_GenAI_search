@@ -165,7 +165,7 @@ def load_autoencoder(ckpt_path: str, latent_dim: int, c_hid: int = C_HID):
     # Attempt 1 — raw msgpack bytes (most common for phlippe checkpoints)
     try:
         state = _try_load_bytes(ckpt_path, variables)
-        params = state if "params" not in state else state
+        params = state if "params" in state else {"params": state}
         print(f"[autoencoder] Loaded {ckpt_path.name} via msgpack bytes.")
         return model, params
     except Exception as e:
