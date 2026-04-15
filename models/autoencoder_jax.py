@@ -162,10 +162,13 @@ def load_autoencoder(ckpt_path: str, latent_dim: int, c_hid: int = C_HID):
 
     errors = []
 
-    # Attempt 1 — raw msgpack bytes (most common for phlippe checkpoints)
+    # Attempt 1 — raw msgpack bytes
     try:
-        state = _try_load_bytes(ckpt_path, variables)
-        params = state if "params" in state else {"params": state}
+        import flax
+        with open(ckpt_path, "rb") as f:
+            data = f.read()
+        raw = flax.serialization.from_bytes(None, data)  # ← None, not variables
+        params = raw if "params" in raw else {"params": raw}
         print(f"[autoencoder] Loaded {ckpt_path.name} via msgpack bytes.")
         return model, params
     except Exception as e:
