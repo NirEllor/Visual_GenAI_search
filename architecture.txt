@@ -34,9 +34,26 @@ Decoder  (mirrors encoder with transposed convolutions)
   Conv(c_hid, 3×3)              → GELU        # (B, 16, 16, c_hid)
   ConvTranspose(3, 3×3, stride=2) → tanh      # (B, 32, 32, 3)
 
-Checkpoint URLs
-  https://raw.githubusercontent.com/phlippe/saved_models/main/JAX/tutorial9/cifar10_{dim}.ckpt
-  (custom dims 8/16/32 use cifar10_{dim}_custom.ckpt)
+Checkpoint source
+  Pretrained (dims 64, 128, 256, 384):
+    https://raw.githubusercontent.com/phlippe/saved_models/main/JAX/tutorial9/cifar10_{dim}.ckpt
+  Custom-trained (dims 8, 16, 32):
+    checkpoints/cifar10_{dim}_custom.ckpt  — trained by step0_train_autoencoder.py
+
+Step 0 — Custom autoencoder training  (dims 8, 16, 32 only)
+------------------------------------------------------------
+  Framework   : JAX + Flax + Optax
+  Objective   : MSE reconstruction loss  (pixel-space, values in [-1, 1])
+                  L = mean( (decode(encode(x)) − x)² )
+  Optimizer   : Adam  (lr=1e-3)
+  Epochs      : 500
+  Batch size  : 256
+  Checkpoint  : best validation loss params saved (not last epoch)
+  Data split  : CIFAR-10 train (50 000) for training,
+                CIFAR-10 test  (10 000) for validation
+  Log interval: every 50 epochs
+  Output      : checkpoints/cifar10_{8,16,32}_custom.ckpt
+                (serialised via flax.serialization.to_bytes on params["params"])
 
 
 ────────────────────────────────────────────────────────────────────────────────
