@@ -25,7 +25,7 @@ STUDENT_DDIM_STEPS = 4
 DECODE_BATCH       = 256
 CKPT_DIR           = "checkpoints"
 MODEL_DIR          = "models"
-RESULTS_DIR        = "results"
+RESULTS_DIR        = "results/frozen_AE"
 
 
 # ── phase 1: PyTorch only ─────────────────────────────────────────────────────
