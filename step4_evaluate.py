@@ -19,7 +19,7 @@ from PIL import Image
 from tqdm import tqdm
 
 # ── configuration ─────────────────────────────────────────────────────────────
-LATENT_DIMS        = [64, 128, 256, 384]
+LATENT_DIMS        = [8, 16, 32, 64, 128, 256, 384]
 N_SAMPLES          = 10_000
 STUDENT_DDIM_STEPS = 4
 DECODE_BATCH       = 256
