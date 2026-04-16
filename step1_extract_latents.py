@@ -21,7 +21,7 @@ import torch
 import torchvision
 import torchvision.transforms as T
 
-LATENT_DIMS   = [8, 16, 32, 64, 128, 256, 384]
+LATENT_DIMS   = [64, 128, 256, 384]
 DATA_DIR      = "data"
 CKPT_DIR      = "checkpoints"
 LATENT_DIR    = "latents"
