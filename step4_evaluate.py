@@ -75,7 +75,8 @@ def generate_only(dim: int) -> None:
 
 def decode_only(dim: int) -> None:
     """Decode latents to images using JAX autoencoder. JAX + NumPy>=2 only."""
-    from models.autoencoder_jax import load_autoencoder, decode_latents, CHECKPOINT_NAMES
+    import pickle
+    from models.autoencoder_jax import load_autoencoder, decode_latents, encode_dataset, CHECKPOINT_NAMES
 
     Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
@@ -100,6 +101,30 @@ def decode_only(dim: int) -> None:
         Image.fromarray(img).save(gen_dir / f"{i:05d}.png")
     print(f"  Images saved → {gen_dir}/")
 
+    # ── AE reconstruction FID: encode real CIFAR-10 test set → decode → save ──
+    test_batch_path = Path("data") / "cifar-10-batches-py" / "test_batch"
+    if not test_batch_path.exists():
+        print(f"  [warning] CIFAR-10 test batch not found at {test_batch_path} — skipping AE reconstruction.")
+        return
+
+    print("  Loading CIFAR-10 test set for AE reconstruction …")
+    with open(test_batch_path, "rb") as f:
+        batch = pickle.load(f, encoding="bytes")
+    # CIFAR-10 stores data as (N, 3072) uint8 in RGB channel-first order
+    images_np = batch[b"data"].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)  # (10000, 32, 32, 3)
+    images_float = images_np.astype(np.float32) / 127.5 - 1.0                # [-1, 1]
+
+    print("  Encoding real images → latents …")
+    z_real = encode_dataset(ae_model, ae_params, images_float, batch_size=DECODE_BATCH)
+    print("  Decoding latents → reconstructed images …")
+    recon_uint8 = decode_latents(ae_model, ae_params, z_real, batch_size=DECODE_BATCH)
+
+    ae_dir = Path(RESULTS_DIR) / f"ae_reconstructed_{dim}"
+    ae_dir.mkdir(parents=True, exist_ok=True)
+    for i, img in enumerate(tqdm(recon_uint8, desc="Saving AE reconstructions", leave=False)):
+        Image.fromarray(img).save(ae_dir / f"{i:05d}.png")
+    print(f"  AE reconstructions saved → {ae_dir}/")
+
 
 # ── phase 3: PyTorch only ─────────────────────────────────────────────────────
 
@@ -119,9 +144,16 @@ def metrics_only(dim: int) -> None:
     is_score = compute_inception_score(str(gen_dir))
     print(f"  IS  = {is_score:.2f}")
 
+    ae_fid = -1.0
+    ae_dir = Path(RESULTS_DIR) / f"ae_reconstructed_{dim}"
+    if ae_dir.exists():
+        print("  Computing AE reconstruction FID …")
+        ae_fid = compute_fid(str(ae_dir))
+        print(f"  AE FID = {ae_fid:.2f}")
+
     dim_metrics_path = Path(RESULTS_DIR) / f"metrics_{dim}.json"
     with open(dim_metrics_path, "w") as f:
-        json.dump({str(dim): {"fid": fid, "is": is_score}}, f, indent=2)
+        json.dump({str(dim): {"fid": fid, "is": is_score, "ae_fid": ae_fid}}, f, indent=2)
     print(f"  Metrics saved → {dim_metrics_path}")
 
 
@@ -169,13 +201,15 @@ def plot_only() -> None:
         json.dump(metrics, f, indent=2)
 
     valid_dims = [d for d in LATENT_DIMS if d in metrics]
-    fid_scores = [metrics[d]["fid"] for d in valid_dims]
-    is_scores  = [metrics[d]["is"]  for d in valid_dims]
+    fid_scores  = [metrics[d]["fid"]    for d in valid_dims]
+    is_scores   = [metrics[d]["is"]     for d in valid_dims]
+    ae_fid_scores = [metrics[d].get("ae_fid", -1.0) for d in valid_dims]
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
     axes[0].plot(valid_dims, fid_scores, marker="o", linewidth=2, color="royalblue")
     axes[0].set_xlabel("Latent Dim"); axes[0].set_ylabel("FID (↓)")
-    axes[0].set_title("FID vs Latent Dim"); axes[0].grid(True, alpha=0.4)
+    axes[0].set_title("Diffusion FID vs Latent Dim"); axes[0].grid(True, alpha=0.4)
 
     valid_is = [v for v in is_scores if v >= 0]
     if valid_is:
@@ -184,6 +218,15 @@ def plot_only() -> None:
         axes[1].set_title("IS vs Latent Dim"); axes[1].grid(True, alpha=0.4)
     else:
         axes[1].set_visible(False)
+
+    valid_ae = [(d, s) for d, s in zip(valid_dims, ae_fid_scores) if s >= 0]
+    if valid_ae:
+        ae_dims, ae_fids = zip(*valid_ae)
+        axes[2].plot(ae_dims, ae_fids, marker="^", linewidth=2, color="seagreen")
+        axes[2].set_xlabel("Latent Dim"); axes[2].set_ylabel("FID (↓)")
+        axes[2].set_title("AE Reconstruction FID vs Latent Dim"); axes[2].grid(True, alpha=0.4)
+    else:
+        axes[2].set_visible(False)
 
     plt.tight_layout()
     plt.savefig(str(Path(RESULTS_DIR) / "fid_vs_dim.png"), dpi=150)
