@@ -68,7 +68,7 @@ def update_ema(ema_model, model, decay=EMA_DECAY):
             ema_p.data.mul_(decay).add_(p.data, alpha=1 - decay)
 
 
-def plot_teacher_loss(history: list, dim: int, results_dir: str = "results") -> None:
+def plot_teacher_loss(history: list, dim: int, results_dir: str = "results/frozen_AE") -> None:
     Path(results_dir).mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(range(1, len(history) + 1), history, color="royalblue", linewidth=1.5)

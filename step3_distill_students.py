@@ -49,7 +49,7 @@ def plot_combined_losses(
     teacher_history: list,
     student_history: dict,
     dim: int,
-    results_dir: str = "results",
+    results_dir: str = "results/frozen_AE",
 ) -> None:
     Path(results_dir).mkdir(parents=True, exist_ok=True)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
