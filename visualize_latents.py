@@ -91,7 +91,7 @@ def reduce_2d(X: np.ndarray, method: str) -> np.ndarray:
     elif method == "tsne":
         from sklearn.manifold import TSNE
         return TSNE(
-            n_components=2, perplexity=40, n_iter=1000,
+            n_components=2, perplexity=40, max_iter=1000,
             random_state=42, n_jobs=-1,
         ).fit_transform(X_scaled)
 
