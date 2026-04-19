@@ -2,7 +2,6 @@
 checkpoints/
 data/
 latents/
-results/
 models/*.pt
 
 # Python
