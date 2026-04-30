@@ -87,7 +87,8 @@ def plot_loss(history: list, dim: int, n_samples: int) -> None:
     plt.close()
 
 
-def train_student(dim: int, n_samples: int, device: torch.device) -> None:
+def train_student(dim: int, n_samples: int, device: torch.device,
+                  load_to_ram: bool = True) -> None:
     out_path = MODEL_DIR / f"student_{dim}_{n_samples}.pt"
     if out_path.exists():
         print(f"  [skip] {out_path.name} already exists.")
@@ -107,17 +108,31 @@ def train_student(dim: int, n_samples: int, device: torch.device) -> None:
     lat_mean, lat_std = float(stats[0]), float(stats[1])
 
     # ── dataset ───────────────────────────────────────────────────────────────
-    # Read memmap then copy into RAM so DataLoader workers can shuffle freely.
-    # shuffle=True randomises sample order every epoch via a random index permutation.
-    x0_data  = np.memmap(str(data_path), dtype="float32", mode="r", shape=(n_samples, dim))
-    ram_mb   = n_samples * dim * 4 / 1e6
+    size_gb = n_samples * dim * 4 / 1e9
     print(f"\n  dim={dim}  n={n_samples:,}  device={device}")
-    print(f"  Loading dataset into RAM ({ram_mb:,.0f} MB) …")
-    x0_tensor = torch.from_numpy(np.array(x0_data))   # full copy → shuffleable
-    del x0_data
+    print(f"  Dataset size: {size_gb:.2f} GB")
+
+    x0_data = np.memmap(str(data_path), dtype="float32", mode="r", shape=(n_samples, dim))
+
+    if load_to_ram:
+        try:
+            print(f"  Loading dataset into RAM ({size_gb:.2f} GB) …")
+            x0_tensor = torch.from_numpy(np.array(x0_data))
+            del x0_data
+            shuffle = True
+            print("  Loaded. shuffle=True (random permutation each epoch)")
+        except MemoryError:
+            print(f"  [warning] MemoryError — falling back to memmap "
+                  f"(file-backed, shuffle=True via random index access, slower on HDD)")
+            x0_tensor = torch.from_numpy(x0_data)
+            shuffle = True
+    else:
+        print("  Using memmap (file-backed). shuffle=True via random index access.")
+        x0_tensor = torch.from_numpy(x0_data)
+        shuffle = True
 
     dataset = TensorDataset(x0_tensor)
-    loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,
+    loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=shuffle,
                          num_workers=2, pin_memory=True)
 
     steps_per_epoch = len(loader)
@@ -210,6 +225,11 @@ def main():
                         help="Latent dim to distil (omit for all)")
     parser.add_argument("--size", type=int, choices=DATASET_SIZES,
                         help="Synthetic dataset size to use (omit for all sizes)")
+    parser.add_argument("--load-to-ram", dest="load_to_ram",
+                        action="store_true", default=True,
+                        help="Copy dataset into RAM before training (default: on)")
+    parser.add_argument("--no-load-to-ram", dest="load_to_ram", action="store_false",
+                        help="Keep dataset file-backed via memmap (lower RAM, slower)")
     args = parser.parse_args()
 
     dims  = [args.dim]  if args.dim  else LATENT_DIMS
@@ -223,7 +243,7 @@ def main():
         print(f"Distilling students  latent_dim={dim}  device={device}")
         print(f"{'='*60}")
         for n_samples in sizes:
-            train_student(dim, n_samples, device)
+            train_student(dim, n_samples, device, load_to_ram=args.load_to_ram)
 
     print("\nStep 3b complete.")
 
