@@ -106,25 +106,37 @@ def train_student(dim: int, n_samples: int, device: torch.device) -> None:
     stats = np.load(stats_path)
     lat_mean, lat_std = float(stats[0]), float(stats[1])
 
-    print(f"\n  dim={dim}  n={n_samples:,}  device={device}")
-
     # ── dataset ───────────────────────────────────────────────────────────────
-    # Load via memmap to avoid pulling the entire file into RAM at once
-    x0_data = np.memmap(str(data_path), dtype="float32", mode="r", shape=(n_samples, dim))
-    dataset  = TensorDataset(torch.from_numpy(np.array(x0_data)))
-    loader   = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,
-                          num_workers=2, pin_memory=True)
+    # Read memmap then copy into RAM so DataLoader workers can shuffle freely.
+    # shuffle=True randomises sample order every epoch via a random index permutation.
+    x0_data  = np.memmap(str(data_path), dtype="float32", mode="r", shape=(n_samples, dim))
+    ram_mb   = n_samples * dim * 4 / 1e6
+    print(f"\n  dim={dim}  n={n_samples:,}  device={device}")
+    print(f"  Loading dataset into RAM ({ram_mb:,.0f} MB) …")
+    x0_tensor = torch.from_numpy(np.array(x0_data))   # full copy → shuffleable
+    del x0_data
+
+    dataset = TensorDataset(x0_tensor)
+    loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,
+                         num_workers=2, pin_memory=True)
+
+    steps_per_epoch = len(loader)
+    total_steps     = EPOCHS * steps_per_epoch
+    print(f"  Batch shape      : ({BATCH_SIZE}, {dim})")
+    print(f"  Steps per epoch  : {steps_per_epoch:,}")
+    print(f"  Total opt. steps : {total_steps:,}")
 
     # ── model ─────────────────────────────────────────────────────────────────
     student     = StudentDenoiser(latent_dim=dim).to(device)
     ema_student = create_ema(student, device)
-    print(f"  Student params: {param_count(student)}")
+    print(f"  Student params   : {param_count(student)}")
 
     optimizer = AdamW(student.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=LR * 0.01)
 
-    best_loss = float("inf")
-    history   = []
+    best_loss      = float("inf")
+    history        = []
+    sanity_checked = False
 
     for epoch in tqdm(range(1, EPOCHS + 1), desc=f"    dim={dim} n={n_samples:,}"):
         student.train()
@@ -141,6 +153,17 @@ def train_student(dim: int, n_samples: int, device: torch.device) -> None:
 
             x_t      = (1.0 - t_) * x_0 + t_ * x_1
             v_target = x_1 - x_0                 # same x_1 as above
+
+            # ── one-time sanity check: verify x_t and v_target share x_1/t ───
+            if not sanity_checked:
+                residual = (x_t - (1.0 - t_) * x_0 - t_ * x_1).abs().max().item()
+                assert residual < 1e-5, \
+                    f"x_t construction inconsistency — max residual={residual:.2e}"
+                assert torch.allclose(v_target, x_1 - x_0, atol=1e-6), \
+                    "v_target does not equal x_1 - x_0 from the same x_1"
+                print(f"  [sanity] x_t/v_target consistency check passed "
+                      f"(max residual={residual:.2e})")
+                sanity_checked = True
 
             v_pred = student(x_t, t)
             loss   = F.mse_loss(v_pred, v_target)
