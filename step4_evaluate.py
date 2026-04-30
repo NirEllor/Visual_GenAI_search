@@ -1,10 +1,10 @@
 """
 Step 4 — Generate images, compute metrics, and plot FID vs latent dim.
 Split into four phases:
-  --generate-only DIM : PyTorch only, saves z_orig_{dim}.npy
-  --decode-only DIM   : JAX only, decodes latents to images
-  --metrics-only DIM  : PyTorch only, computes FID/IS on saved images
-  --plot-only         : merges JSONs and plots
+  --generate-only DIM : generate latents with student, saves z_orig_{dim}.npy
+  --decode-only DIM   : decode latents → PNG images using trained PyTorch AE
+  --metrics-only DIM  : compute FID/IS on saved images
+  --plot-only         : merge per-dim JSONs and produce fid_vs_dim.png
 """
 
 import argparse
@@ -19,29 +19,27 @@ from PIL import Image
 from tqdm import tqdm
 
 # ── configuration ─────────────────────────────────────────────────────────────
-LATENT_DIMS        = [8, 16, 32, 64, 128, 256, 384]
+LATENT_DIMS        = [64, 128, 256, 384]
 N_SAMPLES          = 10_000
 STUDENT_DDIM_STEPS = 4
 DECODE_BATCH       = 256
-CKPT_DIR           = "checkpoints"
-MODEL_DIR          = "models"
-RESULTS_DIR        = "results/frozen_AE"
+CKPT_DIR           = Path("checkpoints")
+MODEL_DIR          = Path("models")
+RESULTS_DIR        = Path("results/trained_AE")
 
 
-# ── phase 1: PyTorch only ─────────────────────────────────────────────────────
+# ── phase 1: generate latents ─────────────────────────────────────────────────
 
 def generate_only(dim: int) -> None:
-    """Generate latents with student model and save to disk. PyTorch only."""
     import torch
     from models.diffusion import DiffusionSchedule
     from models.denoiser import load_student
 
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    print(f"[generate] dim={dim} device={device}")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"[generate] dim={dim}  device={device}")
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
-
-    student_path = Path(MODEL_DIR) / f"student_{dim}.pt"
+    student_path = MODEL_DIR / f"student_{dim}.pt"
     if not student_path.exists():
         print(f"[ERROR] {student_path} not found — run step3 first.")
         return
@@ -54,8 +52,7 @@ def generate_only(dim: int) -> None:
     ddim_steps = int(ckpt.get("student_ddim_steps", STUDENT_DDIM_STEPS))
 
     print(f"  Generating {N_SAMPLES} samples with DDIM-{ddim_steps} …")
-    all_latents = []
-    generated   = 0
+    all_latents, generated = [], 0
     while generated < N_SAMPLES:
         n_batch = min(512, N_SAMPLES - generated)
         z = diffusion.ddim_sample(student, (n_batch, dim), n_steps=ddim_steps, eta=0.0)
@@ -66,105 +63,108 @@ def generate_only(dim: int) -> None:
     z_orig = (z_norm * lat_std + lat_mean).astype(np.float32)
     print(f"  Latent range: [{z_orig.min():.3f}, {z_orig.max():.3f}]")
 
-    out_path = Path(RESULTS_DIR) / f"z_orig_{dim}.npy"
+    out_path = RESULTS_DIR / f"z_orig_{dim}.npy"
     np.save(out_path, z_orig)
     print(f"  Saved → {out_path}")
 
 
-# ── phase 2: JAX only ─────────────────────────────────────────────────────────
+# ── phase 2: decode latents → images (PyTorch AE) ────────────────────────────
 
 def decode_only(dim: int) -> None:
-    """Decode latents to images using JAX autoencoder. JAX + NumPy>=2 only."""
-    import pickle
-    from models.autoencoder_jax import load_autoencoder, decode_latents, encode_dataset, CHECKPOINT_NAMES
+    import torch
+    from torchvision import datasets, transforms
+    from torch.utils.data import DataLoader
+    from models.autoencoder import ConvAutoencoder
 
-    Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"[decode] dim={dim}  device={device}")
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    z_path = Path(RESULTS_DIR) / f"z_orig_{dim}.npy"
+    z_path = RESULTS_DIR / f"z_orig_{dim}.npy"
     if not z_path.exists():
         print(f"[ERROR] {z_path} not found — run --generate-only first.")
         return
 
-    z_orig = np.load(z_path)
-    print(f"[decode] dim={dim} latents shape: {z_orig.shape}")
-
-    ckpt_path = Path(CKPT_DIR) / CHECKPOINT_NAMES[dim]
-    ae_model, ae_params = load_autoencoder(str(ckpt_path), latent_dim=dim)
-
-    print("  Decoding latents → pixel images …")
-    images_uint8 = decode_latents(ae_model, ae_params, z_orig, batch_size=DECODE_BATCH)
-    print(f"  Decoded shape: {images_uint8.shape}")
-
-    gen_dir = Path(RESULTS_DIR) / f"generated_{dim}"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    for i, img in enumerate(tqdm(images_uint8, desc="Saving images", leave=False)):
-        Image.fromarray(img).save(gen_dir / f"{i:05d}.png")
-    print(f"  Images saved → {gen_dir}/")
-
-    # ── AE reconstruction FID: encode real CIFAR-10 test set → decode → save ──
-    test_batch_path = Path("data") / "cifar-10-batches-py" / "test_batch"
-    if not test_batch_path.exists():
-        print(f"  [warning] CIFAR-10 test batch not found at {test_batch_path} — skipping AE reconstruction.")
+    ae_path = CKPT_DIR / f"ae_{dim}.pt"
+    if not ae_path.exists():
+        print(f"[ERROR] {ae_path} not found — run step0 first.")
         return
 
-    print("  Loading CIFAR-10 test set for AE reconstruction …")
-    with open(test_batch_path, "rb") as f:
-        batch = pickle.load(f, encoding="bytes")
-    # CIFAR-10 stores data as (N, 3072) uint8 in RGB channel-first order
-    images_np = batch[b"data"].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)  # (10000, 32, 32, 3)
-    images_float = images_np.astype(np.float32) / 127.5 - 1.0                # [-1, 1]
+    ckpt  = torch.load(ae_path, map_location=device, weights_only=True)
+    model = ConvAutoencoder(latent_dim=dim).to(device)
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
 
-    print("  Encoding real images → latents …")
-    z_real = encode_dataset(ae_model, ae_params, images_float, batch_size=DECODE_BATCH)
-    print("  Decoding latents → reconstructed images …")
-    recon_uint8 = decode_latents(ae_model, ae_params, z_real, batch_size=DECODE_BATCH)
+    # ── decode generated latents → PNG images ────────────────────────────────
+    z_orig  = torch.from_numpy(np.load(z_path))
+    gen_dir = RESULTS_DIR / f"generated_{dim}"
+    gen_dir.mkdir(parents=True, exist_ok=True)
 
-    ae_dir = Path(RESULTS_DIR) / f"ae_reconstructed_{dim}"
+    print(f"  Decoding {len(z_orig)} generated latents …")
+    img_idx = 0
+    with torch.no_grad():
+        for start in tqdm(range(0, len(z_orig), DECODE_BATCH), desc="  Decoding", leave=False):
+            z_batch = z_orig[start:start + DECODE_BATCH].to(device)
+            recon   = model.decode(z_batch)                         # (B, 3, 32, 32) in [0,1]
+            recon   = (recon.clamp(0, 1) * 255).byte().cpu().numpy()
+            recon   = recon.transpose(0, 2, 3, 1)                  # (B, H, W, 3)
+            for img_arr in recon:
+                Image.fromarray(img_arr).save(gen_dir / f"{img_idx:05d}.png")
+                img_idx += 1
+    print(f"  Images saved → {gen_dir}/  ({img_idx} files)")
+
+    # ── AE reconstruction FID: encode/decode CIFAR-10 test set ───────────────
+    print("  Encoding CIFAR-10 test set for AE reconstruction FID …")
+    tf      = transforms.ToTensor()
+    testset = datasets.CIFAR10(root="data", train=False, download=True, transform=tf)
+    loader  = DataLoader(testset, batch_size=DECODE_BATCH, shuffle=False, num_workers=2)
+
+    ae_dir = RESULTS_DIR / f"ae_reconstructed_{dim}"
     ae_dir.mkdir(parents=True, exist_ok=True)
-    for i, img in enumerate(tqdm(recon_uint8, desc="Saving AE reconstructions", leave=False)):
-        Image.fromarray(img).save(ae_dir / f"{i:05d}.png")
-    print(f"  AE reconstructions saved → {ae_dir}/")
+
+    img_idx = 0
+    with torch.no_grad():
+        for imgs, _ in tqdm(loader, desc="  AE recon", leave=False):
+            imgs  = imgs.to(device)
+            recon = model(imgs)                                     # encode → decode
+            recon = (recon.clamp(0, 1) * 255).byte().cpu().numpy()
+            recon = recon.transpose(0, 2, 3, 1)
+            for img_arr in recon:
+                Image.fromarray(img_arr).save(ae_dir / f"{img_idx:05d}.png")
+                img_idx += 1
+    print(f"  AE reconstructions saved → {ae_dir}/  ({img_idx} files)")
 
 
-# ── phase 3: PyTorch only ─────────────────────────────────────────────────────
+# ── phase 3: compute FID / IS ─────────────────────────────────────────────────
 
 def metrics_only(dim: int) -> None:
-    """Compute FID/IS on saved images. PyTorch only."""
-    gen_dir = Path(RESULTS_DIR) / f"generated_{dim}"
+    gen_dir = RESULTS_DIR / f"generated_{dim}"
     if not gen_dir.exists():
         print(f"[ERROR] {gen_dir} not found — run --decode-only first.")
         return
 
     print(f"[metrics] dim={dim}")
-    print("  Computing FID …")
-    fid = compute_fid(str(gen_dir))
-    print(f"  FID = {fid:.2f}")
-
-    print("  Computing IS …")
-    is_score = compute_inception_score(str(gen_dir))
-    print(f"  IS  = {is_score:.2f}")
+    fid    = compute_fid(str(gen_dir))
+    is_val = compute_inception_score(str(gen_dir))
+    print(f"  FID={fid:.2f}  IS={is_val:.2f}")
 
     ae_fid = -1.0
-    ae_dir = Path(RESULTS_DIR) / f"ae_reconstructed_{dim}"
+    ae_dir = RESULTS_DIR / f"ae_reconstructed_{dim}"
     if ae_dir.exists():
-        print("  Computing AE reconstruction FID …")
         ae_fid = compute_fid(str(ae_dir))
-        print(f"  AE FID = {ae_fid:.2f}")
+        print(f"  AE-FID={ae_fid:.2f}")
 
-    dim_metrics_path = Path(RESULTS_DIR) / f"metrics_{dim}.json"
-    with open(dim_metrics_path, "w") as f:
-        json.dump({str(dim): {"fid": fid, "is": is_score, "ae_fid": ae_fid}}, f, indent=2)
-    print(f"  Metrics saved → {dim_metrics_path}")
+    out = RESULTS_DIR / f"metrics_{dim}.json"
+    with open(out, "w") as f:
+        json.dump({str(dim): {"fid": fid, "is": is_val, "ae_fid": ae_fid}}, f, indent=2)
+    print(f"  Saved → {out}")
 
-
-# ── metrics helpers ───────────────────────────────────────────────────────────
 
 def compute_fid(gen_dir: str) -> float:
     try:
         from cleanfid import fid
         return float(fid.compute_fid(gen_dir, dataset_name="cifar10",
-                                     dataset_res=32, dataset_split="train",
-                                     verbose=True))
+                                     dataset_res=32, dataset_split="train", verbose=True))
     except ImportError:
         print("  [warning] clean-fid not installed.")
         return -1.0
@@ -183,10 +183,10 @@ def compute_inception_score(gen_dir: str) -> float:
 # ── phase 4: plot ─────────────────────────────────────────────────────────────
 
 def plot_only() -> None:
-    Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     metrics = {}
     for dim in LATENT_DIMS:
-        p = Path(RESULTS_DIR) / f"metrics_{dim}.json"
+        p = RESULTS_DIR / f"metrics_{dim}.json"
         if not p.exists():
             print(f"[warning] {p} not found — skipping dim {dim}.")
             continue
@@ -197,13 +197,13 @@ def plot_only() -> None:
         print("[ERROR] No per-dim metrics found.")
         return
 
-    with open(Path(RESULTS_DIR) / "metrics.json", "w") as f:
+    with open(RESULTS_DIR / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
-    valid_dims = [d for d in LATENT_DIMS if d in metrics]
-    fid_scores  = [metrics[d]["fid"]    for d in valid_dims]
-    is_scores   = [metrics[d]["is"]     for d in valid_dims]
-    ae_fid_scores = [metrics[d].get("ae_fid", -1.0) for d in valid_dims]
+    valid_dims    = [d for d in LATENT_DIMS if d in metrics]
+    fid_scores    = [metrics[d]["fid"]             for d in valid_dims]
+    is_scores     = [metrics[d]["is"]              for d in valid_dims]
+    ae_fid_scores = [metrics[d].get("ae_fid", -1) for d in valid_dims]
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
@@ -211,8 +211,7 @@ def plot_only() -> None:
     axes[0].set_xlabel("Latent Dim"); axes[0].set_ylabel("FID (↓)")
     axes[0].set_title("Diffusion FID vs Latent Dim"); axes[0].grid(True, alpha=0.4)
 
-    valid_is = [v for v in is_scores if v >= 0]
-    if valid_is:
+    if any(v >= 0 for v in is_scores):
         axes[1].plot(valid_dims, is_scores, marker="s", linewidth=2, color="darkorange")
         axes[1].set_xlabel("Latent Dim"); axes[1].set_ylabel("IS (↑)")
         axes[1].set_title("IS vs Latent Dim"); axes[1].grid(True, alpha=0.4)
@@ -229,17 +228,9 @@ def plot_only() -> None:
         axes[2].set_visible(False)
 
     plt.tight_layout()
-    plt.savefig(str(Path(RESULTS_DIR) / "fid_vs_dim.png"), dpi=150)
-    print("Plot saved → results/fid_vs_dim.png")
-
-    # ── latent space 2D visualisation ─────────────────────────────────────────
-    try:
-        from visualize_latents import run as visualize_latents
-        print("\n[phase 4] Generating latent space 2D visualisation (PCA) …")
-        visualize_latents(method="pca", n_samples=5000)
-    except Exception as e:
-        print(f"[warning] Latent space visualisation skipped: {e}")
-
+    out_png = RESULTS_DIR / "fid_vs_dim.png"
+    plt.savefig(str(out_png), dpi=150)
+    print(f"Plot saved → {out_png}")
     print("\nStep 4 complete.")
 
 
@@ -249,11 +240,11 @@ def main():
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--generate-only", type=int, choices=LATENT_DIMS, metavar="DIM",
-                       help="Phase 1: generate latents (PyTorch). Saves z_orig_{dim}.npy")
+                       help="Phase 1: generate latents with student DDIM.")
     group.add_argument("--decode-only", type=int, choices=LATENT_DIMS, metavar="DIM",
-                       help="Phase 2: decode latents to images (JAX). Needs z_orig_{dim}.npy")
+                       help="Phase 2: decode latents → PNG images via PyTorch AE.")
     group.add_argument("--metrics-only", type=int, choices=LATENT_DIMS, metavar="DIM",
-                       help="Phase 3: compute FID/IS (PyTorch). Needs generated_{dim}/")
+                       help="Phase 3: compute FID/IS on saved images.")
     group.add_argument("--plot-only", action="store_true",
                        help="Phase 4: merge JSONs and plot.")
     args = parser.parse_args()
@@ -267,7 +258,7 @@ def main():
     elif args.plot_only:
         plot_only()
     else:
-        print("Specify --generate-only, --decode-only, --metrics-only, or --plot-only")
+        print("Specify --generate-only, --decode-only, --metrics-only, or --plot-only.")
 
 
 if __name__ == "__main__":
