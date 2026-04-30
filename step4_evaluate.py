@@ -1,29 +1,18 @@
 """
-Step 4 — Generate images, compute FID/IS, and plot results for all 24 students.
+Step 4 — Generate images, compute FID/IS, and plot results for teachers + 24 students.
 
 Four phases, each independently restartable:
 
-  --generate  --dim D --size N   : Euler-sample 10k latents from student_{D}_{N}.pt
-  --decode    --dim D --size N   : decode latents → PNGs via AE; also saves AE recon
-  --metrics   --dim D --size N   : compute FID + IS on generated_{D}_{N}/
-  --plot                         : merge all per-(dim,size) JSONs and produce:
-                                     fid_vs_size.png  — FID vs dataset size, one line per dim
-                                     fid_vs_dim.png   — FID vs latent dim, one line per size
+  --generate  --dim D [--size N | --teacher]
+  --decode    --dim D [--size N | --teacher]
+  --metrics   --dim D [--size N | --teacher]
+  --plot  →  fid_vs_size.png, fid_vs_dim.png, metrics_all.json
 
-Usage examples:
-    # run one student
+Omit --size and --teacher to run a student. Use --teacher to evaluate the teacher.
+
+Usage:
     python step4_evaluate.py --generate --dim 128 --size 500000
-    python step4_evaluate.py --decode   --dim 128 --size 500000
-    python step4_evaluate.py --metrics  --dim 128 --size 500000
-
-    # batch across all 24 students (run in parallel via SLURM array jobs)
-    for dim in 64 128 256 384 512 1024; do
-      for size in 250000 500000 1000000 2000000; do
-        python step4_evaluate.py --generate --dim $dim --size $size &
-      done
-    done
-
-    # after all jobs finish
+    python step4_evaluate.py --generate --dim 128 --teacher
     python step4_evaluate.py --plot
 """
 
@@ -31,6 +20,7 @@ import argparse
 import json
 import numpy as np
 from pathlib import Path
+from typing import Optional
 
 import matplotlib
 matplotlib.use("Agg")
@@ -47,34 +37,41 @@ DECODE_BATCH  = 256
 CKPT_DIR      = Path("checkpoints")
 MODEL_DIR     = Path("models")
 RESULTS_DIR   = Path("results/trained_AE")
+AE_EVAL_DIR   = Path("results/ae_eval")
 
-SIZE_LABELS   = {250_000: "250k", 500_000: "500k",
-                 1_000_000: "1M",  2_000_000: "2M"}
-DIM_COLORS    = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
-SIZE_COLORS   = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
+SIZE_LABELS = {250_000: "250k", 500_000: "500k",
+               1_000_000: "1M",  2_000_000: "2M"}
+DIM_COLORS  = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+SIZE_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── path helpers (size=None → teacher) ───────────────────────────────────────
 
-def z_path(dim: int, size: int) -> Path:
-    return RESULTS_DIR / f"z_orig_{dim}_{size}.npy"
+def _tag(size: Optional[int]) -> str:
+    return "teacher" if size is None else str(size)
 
-def gen_dir(dim: int, size: int) -> Path:
-    return RESULTS_DIR / f"generated_{dim}_{size}"
+def _label(size: Optional[int]) -> str:
+    return "teacher" if size is None else SIZE_LABELS[size]
+
+def z_path(dim: int, size: Optional[int]) -> Path:
+    return RESULTS_DIR / f"z_orig_{dim}_{_tag(size)}.npy"
+
+def gen_dir(dim: int, size: Optional[int]) -> Path:
+    return RESULTS_DIR / f"generated_{dim}_{_tag(size)}"
 
 def ae_recon_dir(dim: int) -> Path:
     return RESULTS_DIR / f"ae_reconstructed_{dim}"
 
-def metrics_path(dim: int, size: int) -> Path:
-    return RESULTS_DIR / f"metrics_{dim}_{size}.json"
+def metrics_path(dim: int, size: Optional[int]) -> Path:
+    return RESULTS_DIR / f"metrics_{dim}_{_tag(size)}.json"
 
 
 # ── phase 1: generate latents ─────────────────────────────────────────────────
 
-def generate(dim: int, size: int) -> None:
+def generate(dim: int, size: Optional[int]) -> None:
     import torch
     from models.diffusion import FlowMatching
-    from models.denoiser import load_student
+    from models.denoiser import load_student, load_teacher
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -84,24 +81,34 @@ def generate(dim: int, size: int) -> None:
         print(f"[generate] [skip] {out.name} already exists.")
         return
 
-    student_ckpt = MODEL_DIR / f"student_{dim}_{size}.pt"
-    if not student_ckpt.exists():
-        print(f"[generate] [ERROR] {student_ckpt} not found — run step3b first.")
-        return
+    is_teacher = size is None
+    if is_teacher:
+        ckpt_path = MODEL_DIR / f"teacher_{dim}.pt"
+        if not ckpt_path.exists():
+            print(f"[generate] [ERROR] {ckpt_path} not found — run step2 first.")
+            return
+        print(f"[generate] dim={dim}  model=teacher  device={device}")
+        model       = load_teacher(str(ckpt_path), latent_dim=dim, device=device)
+        euler_steps = EULER_STEPS
+    else:
+        ckpt_path = MODEL_DIR / f"student_{dim}_{size}.pt"
+        if not ckpt_path.exists():
+            print(f"[generate] [ERROR] {ckpt_path} not found — run step3b first.")
+            return
+        print(f"[generate] dim={dim}  size={_label(size)}  device={device}")
+        model       = load_student(str(ckpt_path), latent_dim=dim, device=device)
+        euler_steps = EULER_STEPS
 
-    print(f"[generate] dim={dim}  size={SIZE_LABELS[size]}  device={device}")
-    flow        = FlowMatching(device=device)
-    student     = load_student(str(student_ckpt), latent_dim=dim, device=device)
-    ckpt        = torch.load(str(student_ckpt), map_location="cpu", weights_only=True)
-    lat_mean    = float(ckpt["latent_mean"])
-    lat_std     = float(ckpt["latent_std"])
-    euler_steps = int(ckpt.get("student_euler_steps", EULER_STEPS))
+    ckpt     = torch.load(str(ckpt_path), map_location="cpu", weights_only=True)
+    lat_mean = float(ckpt["latent_mean"])
+    lat_std  = float(ckpt["latent_std"])
+    flow     = FlowMatching(device=device)
 
     print(f"  Generating {N_SAMPLES:,} samples with Euler-{euler_steps} …")
     all_latents, generated = [], 0
     while generated < N_SAMPLES:
         n_batch = min(512, N_SAMPLES - generated)
-        z = flow.euler_sample(student, (n_batch, dim), n_steps=euler_steps)
+        z = flow.euler_sample(model, (n_batch, dim), n_steps=euler_steps)
         all_latents.append(z.cpu().numpy())
         generated += n_batch
 
@@ -114,14 +121,14 @@ def generate(dim: int, size: int) -> None:
 
 # ── phase 2: decode latents → images ─────────────────────────────────────────
 
-def decode(dim: int, size: int) -> None:
+def decode(dim: int, size: Optional[int]) -> None:
     import torch
     from torchvision import datasets, transforms
     from torch.utils.data import DataLoader
     from models.autoencoder import ConvAutoencoder
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[decode] dim={dim}  size={SIZE_LABELS[size]}  device={device}")
+    print(f"[decode] dim={dim}  model={_label(size)}  device={device}")
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     zp = z_path(dim, size)
@@ -134,31 +141,31 @@ def decode(dim: int, size: int) -> None:
         print(f"  [ERROR] {ae_ckpt} not found — run step0 first.")
         return
 
-    ckpt  = torch.load(ae_ckpt, map_location=device, weights_only=True)
-    ae    = ConvAutoencoder(latent_dim=dim).to(device)
+    ckpt = torch.load(ae_ckpt, map_location=device, weights_only=True)
+    ae   = ConvAutoencoder(latent_dim=dim).to(device)
     ae.load_state_dict(ckpt["state_dict"])
     ae.eval()
 
-    # ── decode student-generated latents → PNGs ───────────────────────────────
-    gdir = gen_dir(dim, size)
+    # ── decode generated latents → PNGs ──────────────────────────────────────
+    gdir    = gen_dir(dim, size)
     gdir.mkdir(parents=True, exist_ok=True)
     z_orig  = torch.from_numpy(np.load(str(zp)))
     img_idx = 0
     with torch.no_grad():
         for start in tqdm(range(0, len(z_orig), DECODE_BATCH),
-                          desc="  Decoding generated", leave=False):
+                          desc="  Decoding", leave=False):
             z_b   = z_orig[start:start + DECODE_BATCH].to(device)
             recon = (ae.decode(z_b).clamp(0, 1) * 255).byte().cpu().numpy()
             recon = recon.transpose(0, 2, 3, 1)
             for img_arr in recon:
                 Image.fromarray(img_arr).save(gdir / f"{img_idx:05d}.png")
                 img_idx += 1
-    print(f"  Generated images → {gdir}/  ({img_idx} files)")
+    print(f"  Images → {gdir}/  ({img_idx} files)")
 
-    # ── AE reconstruction (shared per dim, skip if already done) ─────────────
+    # ── AE reconstruction (shared per dim, computed once) ─────────────────────
     aedir = ae_recon_dir(dim)
     if aedir.exists():
-        print(f"  AE reconstruction already exists at {aedir}/ — skipping.")
+        print(f"  AE recon already exists at {aedir}/ — skipping.")
         return
 
     print("  Encoding CIFAR-10 test set for AE-FID …")
@@ -174,12 +181,12 @@ def decode(dim: int, size: int) -> None:
             for img_arr in recon:
                 Image.fromarray(img_arr).save(aedir / f"{img_idx:05d}.png")
                 img_idx += 1
-    print(f"  AE reconstructions → {aedir}/  ({img_idx} files)")
+    print(f"  AE recon → {aedir}/  ({img_idx} files)")
 
 
 # ── phase 3: metrics ──────────────────────────────────────────────────────────
 
-def metrics(dim: int, size: int) -> None:
+def metrics(dim: int, size: Optional[int]) -> None:
     gdir = gen_dir(dim, size)
     if not gdir.exists():
         print(f"[metrics] [ERROR] {gdir} not found — run --decode first.")
@@ -190,7 +197,7 @@ def metrics(dim: int, size: int) -> None:
         print(f"[metrics] [skip] {out.name} already exists.")
         return
 
-    print(f"[metrics] dim={dim}  size={SIZE_LABELS[size]}")
+    print(f"[metrics] dim={dim}  model={_label(size)}")
     fid    = compute_fid(str(gdir))
     is_val = compute_inception_score(str(gdir))
     print(f"  FID={fid:.2f}  IS={is_val:.2f}")
@@ -227,48 +234,83 @@ def compute_inception_score(gen_dir: str) -> float:
         return -1.0
 
 
-# ── phase 4: plot ─────────────────────────────────────────────────────────────
+# ── phase 4: plot + unified JSON ──────────────────────────────────────────────
 
 def plot() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ── load all available per-(dim, size) metrics ────────────────────────────
-    all_metrics = {}
+    # ── load student metrics ──────────────────────────────────────────────────
+    student_metrics = {}
     for dim in LATENT_DIMS:
         for size in DATASET_SIZES:
             p = metrics_path(dim, size)
             if p.exists():
                 with open(p) as f:
-                    all_metrics.setdefault(dim, {})[size] = json.load(f)
+                    student_metrics.setdefault(dim, {})[size] = json.load(f)
             else:
-                print(f"[plot] [warning] {p.name} not found — skipping.")
+                print(f"[plot] [warning] {p.name} missing — skipping.")
 
-    if not all_metrics:
-        print("[plot] [ERROR] No metrics found. Run --metrics first.")
+    # ── load teacher metrics ──────────────────────────────────────────────────
+    teacher_metrics = {}
+    for dim in LATENT_DIMS:
+        p = metrics_path(dim, None)
+        if p.exists():
+            with open(p) as f:
+                teacher_metrics[dim] = json.load(f)
+        else:
+            print(f"[plot] [warning] metrics_{dim}_teacher.json missing — skipping.")
+
+    # ── load AE metrics (from step0b) ─────────────────────────────────────────
+    ae_metrics = {}
+    ae_metrics_file = AE_EVAL_DIR / "metrics.json"
+    if ae_metrics_file.exists():
+        with open(ae_metrics_file) as f:
+            ae_metrics = json.load(f)
+    else:
+        print(f"[plot] [warning] {ae_metrics_file} missing — AE metrics excluded.")
+
+    if not student_metrics and not teacher_metrics:
+        print("[plot] [ERROR] No metrics found.")
         return
 
-    with open(RESULTS_DIR / "metrics.json", "w") as f:
-        json.dump({str(d): {str(s): v for s, v in sv.items()}
-                   for d, sv in all_metrics.items()}, f, indent=2)
+    # ── unified JSON ─────────────────────────────────────────────────────────
+    unified = {
+        "ae":      ae_metrics,
+        "teacher": {str(d): v for d, v in teacher_metrics.items()},
+        "student": {str(d): {str(s): v for s, v in sv.items()}
+                    for d, sv in student_metrics.items()},
+    }
+    unified_path = RESULTS_DIR / "metrics_all.json"
+    with open(unified_path, "w") as f:
+        json.dump(unified, f, indent=2)
+    print(f"  Unified metrics → {unified_path}")
 
-    # ── plot 1: FID vs dataset size, one line per dim ─────────────────────────
-    fig1, ax1 = plt.subplots(figsize=(10, 6))
+    # ── plot 1: FID vs dataset size, one line per dim + teacher dashes ────────
+    fig1, ax1 = plt.subplots(figsize=(11, 6))
     for i, dim in enumerate(LATENT_DIMS):
-        if dim not in all_metrics:
-            continue
-        sizes = sorted(all_metrics[dim].keys())
-        fids  = [all_metrics[dim][s]["fid"] for s in sizes]
-        valid = [(s, f) for s, f in zip(sizes, fids) if f >= 0]
-        if not valid:
-            continue
-        xs, ys = zip(*valid)
-        ax1.plot([SIZE_LABELS[x] for x in xs], ys,
-                 marker="o", linewidth=2, label=f"dim={dim}",
-                 color=DIM_COLORS[i % len(DIM_COLORS)])
+        color = DIM_COLORS[i % len(DIM_COLORS)]
 
+        # student line
+        if dim in student_metrics:
+            sizes = sorted(student_metrics[dim].keys())
+            valid = [(s, student_metrics[dim][s]["fid"])
+                     for s in sizes if student_metrics[dim][s]["fid"] >= 0]
+            if valid:
+                xs, ys = zip(*valid)
+                ax1.plot([SIZE_LABELS[x] for x in xs], ys,
+                         marker="o", linewidth=2, color=color, label=f"dim={dim}")
+
+        # teacher horizontal dashed line
+        if dim in teacher_metrics and teacher_metrics[dim]["fid"] >= 0:
+            t_fid = teacher_metrics[dim]["fid"]
+            ax1.axhline(t_fid, color=color, linewidth=1, linestyle="--", alpha=0.6)
+
+    # legend entry for teacher style
+    ax1.plot([], [], color="grey", linewidth=1, linestyle="--", alpha=0.6,
+             label="teacher (per dim)")
     ax1.set_xlabel("Synthetic Dataset Size")
     ax1.set_ylabel("FID (↓)")
-    ax1.set_title("FID vs Synthetic Dataset Size  (one line per latent dim)")
+    ax1.set_title("FID vs Synthetic Dataset Size\n(dashed = teacher baseline per dim)")
     ax1.legend(title="Latent dim", bbox_to_anchor=(1.02, 1), loc="upper left")
     ax1.grid(True, alpha=0.4)
     plt.tight_layout()
@@ -277,22 +319,32 @@ def plot() -> None:
     plt.close(fig1)
     print(f"  Plot saved → {out1}")
 
-    # ── plot 2: FID vs latent dim, one line per dataset size ──────────────────
-    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    # ── plot 2: FID vs latent dim, one line per dataset size + teacher ─────────
+    fig2, ax2 = plt.subplots(figsize=(11, 6))
+
     for i, size in enumerate(DATASET_SIZES):
-        dims_with_data = [d for d in LATENT_DIMS if d in all_metrics and size in all_metrics[d]]
-        fids = [all_metrics[d][size]["fid"] for d in dims_with_data]
-        valid = [(d, f) for d, f in zip(dims_with_data, fids) if f >= 0]
-        if not valid:
-            continue
-        xs, ys = zip(*valid)
-        ax2.plot(xs, ys,
-                 marker="s", linewidth=2, label=SIZE_LABELS[size],
-                 color=SIZE_COLORS[i % len(SIZE_COLORS)])
+        dims_avail = [d for d in LATENT_DIMS
+                      if d in student_metrics and size in student_metrics[d]]
+        valid = [(d, student_metrics[d][size]["fid"])
+                 for d in dims_avail if student_metrics[d][size]["fid"] >= 0]
+        if valid:
+            xs, ys = zip(*valid)
+            ax2.plot(xs, ys, marker="s", linewidth=2,
+                     color=SIZE_COLORS[i % len(SIZE_COLORS)],
+                     label=SIZE_LABELS[size])
+
+    # teacher line across dims
+    teacher_pts = [(d, teacher_metrics[d]["fid"])
+                   for d in LATENT_DIMS
+                   if d in teacher_metrics and teacher_metrics[d]["fid"] >= 0]
+    if teacher_pts:
+        tx, ty = zip(*teacher_pts)
+        ax2.plot(tx, ty, marker="*", markersize=12, linewidth=2,
+                 color="black", linestyle="--", label="teacher")
 
     ax2.set_xlabel("Latent Dim")
     ax2.set_ylabel("FID (↓)")
-    ax2.set_title("FID vs Latent Dim  (one line per synthetic dataset size)")
+    ax2.set_title("FID vs Latent Dim\n(one line per synthetic dataset size + teacher)")
     ax2.legend(title="Dataset size", bbox_to_anchor=(1.02, 1), loc="upper left")
     ax2.grid(True, alpha=0.4)
     plt.tight_layout()
@@ -302,14 +354,17 @@ def plot() -> None:
     print(f"  Plot saved → {out2}")
 
     # ── summary table ─────────────────────────────────────────────────────────
-    print("\nFID summary (rows=dim, cols=size):")
-    header = f"{'dim':>6}  " + "  ".join(f"{SIZE_LABELS[s]:>7}" for s in DATASET_SIZES)
+    print("\nFID summary  (— = missing)")
+    cols  = ["teacher"] + [SIZE_LABELS[s] for s in DATASET_SIZES]
+    header = f"{'dim':>6}  " + "  ".join(f"{c:>8}" for c in cols)
     print(header)
     for dim in LATENT_DIMS:
-        row = f"{dim:>6}  "
+        t_fid = teacher_metrics.get(dim, {}).get("fid", -1)
+        t_str = f"{t_fid:>8.2f}" if t_fid >= 0 else f"{'—':>8}"
+        row = f"{dim:>6}  {t_str}"
         for size in DATASET_SIZES:
-            fid = all_metrics.get(dim, {}).get(size, {}).get("fid", -1)
-            row += f"  {fid:>7.2f}" if fid >= 0 else f"  {'—':>7}"
+            fid = student_metrics.get(dim, {}).get(size, {}).get("fid", -1)
+            row += f"  {fid:>8.2f}" if fid >= 0 else f"  {'—':>8}"
         print(row)
 
     print("\nStep 4 complete.")
@@ -319,31 +374,37 @@ def plot() -> None:
 
 def main():
     parser = argparse.ArgumentParser()
-    phase  = parser.add_mutually_exclusive_group(required=True)
-    phase.add_argument("--generate", action="store_true", help="Phase 1: generate latents")
-    phase.add_argument("--decode",   action="store_true", help="Phase 2: decode latents → images")
-    phase.add_argument("--metrics",  action="store_true", help="Phase 3: compute FID/IS")
-    phase.add_argument("--plot",     action="store_true", help="Phase 4: plot results")
+    phase = parser.add_mutually_exclusive_group(required=True)
+    phase.add_argument("--generate", action="store_true")
+    phase.add_argument("--decode",   action="store_true")
+    phase.add_argument("--metrics",  action="store_true")
+    phase.add_argument("--plot",     action="store_true")
 
-    parser.add_argument("--dim",  type=int, choices=LATENT_DIMS,
-                        help="Latent dim (required for --generate/--decode/--metrics)")
-    parser.add_argument("--size", type=int, choices=DATASET_SIZES,
-                        help="Synthetic dataset size (required for --generate/--decode/--metrics)")
+    parser.add_argument("--dim",     type=int, choices=LATENT_DIMS)
+    parser.add_argument("--size",    type=int, choices=DATASET_SIZES)
+    parser.add_argument("--teacher", action="store_true",
+                        help="Evaluate the teacher model instead of a student")
     args = parser.parse_args()
 
     if args.plot:
         plot()
         return
 
-    if args.dim is None or args.size is None:
-        parser.error("--dim and --size are required for --generate, --decode, and --metrics")
+    if args.dim is None:
+        parser.error("--dim is required for --generate, --decode, and --metrics")
+    if not args.teacher and args.size is None:
+        parser.error("provide --size N or --teacher")
+    if args.teacher and args.size is not None:
+        parser.error("--teacher and --size are mutually exclusive")
+
+    size = None if args.teacher else args.size
 
     if args.generate:
-        generate(args.dim, args.size)
+        generate(args.dim, size)
     elif args.decode:
-        decode(args.dim, args.size)
+        decode(args.dim, size)
     elif args.metrics:
-        metrics(args.dim, args.size)
+        metrics(args.dim, size)
 
 
 if __name__ == "__main__":
