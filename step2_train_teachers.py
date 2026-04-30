@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from models.diffusion import DiffusionSchedule
 from models.denoiser import TeacherDenoiser, param_count
 
-LATENT_DIMS = [64, 128, 256, 384]
+LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
 T            = 1000
 EPOCHS       = 1000
 BATCH_SIZE   = 256

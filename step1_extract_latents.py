@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 from models.autoencoder import ConvAutoencoder
 
-LATENT_DIMS = [64, 128, 256, 384]
+LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
 BATCH_SIZE  = 512
 CKPT_DIR    = Path("checkpoints")
 LATENT_DIR  = Path("latents")
