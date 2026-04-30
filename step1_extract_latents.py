@@ -1,121 +1,82 @@
 """
-Step 1 — Extract latents from frozen JAX/Flax autoencoders.
+Step 1 — Encode all 50k CIFAR-10 training images with trained ConvAutoencoders.
 
-For each latent dimension:
-  1. Download/load the checkpoint.
-  2. Load the pretrained JAX/Flax autoencoder.
-  3. Encode the full CIFAR-10 training set (50,000 images).
-  4. Save the latent vectors as  latents/latents_{dim}.npy
+Requires: checkpoints/ae_{dim}.pt  (produced by step0)
+Saves:    latents/latents_{dim}.npy  — shape (50000, dim), float32
 
-Output files
-------------
-latents/latents_{dim}.npy   shape (50000, dim)
+Usage:
+    python step1_extract_latents.py            # all dims sequentially
+    python step1_extract_latents.py --dim 64   # single dim
 """
 
 import argparse
-import os
-import numpy as np
 from pathlib import Path
 
+import numpy as np
 import torch
-import torchvision
-import torchvision.transforms as T
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+from tqdm import tqdm
 
-LATENT_DIMS   = [64, 128, 256, 384]
-DATA_DIR      = "data"
-CKPT_DIR      = "checkpoints"
-LATENT_DIR    = "latents"
-BATCH_SIZE    = 256
+from models.autoencoder import ConvAutoencoder
 
-CHECKPOINT_NAMES = {
-    8:   "cifar10_8_custom.ckpt",
-    16:  "cifar10_16_custom.ckpt",
-    32:  "cifar10_32_custom.ckpt",
-    64:  "cifar10_64.ckpt",
-    128: "cifar10_128.ckpt",
-    256: "cifar10_256.ckpt",
-    384: "cifar10_384.ckpt",
-}
+LATENT_DIMS = [64, 128, 256, 384]
+BATCH_SIZE  = 512
+CKPT_DIR    = Path("checkpoints")
+LATENT_DIR  = Path("latents")
 
 
-def get_cifar10_numpy() -> np.ndarray:
-    import pickle
-    # Download without transforms
-    import torchvision
-    torchvision.datasets.CIFAR10(root=DATA_DIR, train=True, download=True, transform=None)
+def load_ae(dim: int, device: torch.device) -> ConvAutoencoder:
+    ckpt_path = CKPT_DIR / f"ae_{dim}.pt"
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"{ckpt_path} not found — run step0 first.")
+    ckpt  = torch.load(ckpt_path, map_location=device, weights_only=True)
+    model = ConvAutoencoder(latent_dim=dim).to(device)
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+    return model
 
-    cifar_dir = os.path.join(DATA_DIR, 'cifar-10-batches-py')
 
-    def load_batch(path):
-        with open(path, 'rb') as f:
-            d = pickle.load(f, encoding='latin1')
-        return d['data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
+def extract_latents(dim: int, device: torch.device) -> None:
+    print(f"\n{'='*60}")
+    print(f"Extracting latents  latent_dim={dim}  device={device}")
+    print(f"{'='*60}")
 
-    batches = []
-    for i in range(1, 6):
-        batches.append(load_batch(os.path.join(cifar_dir, f'data_batch_{i}')))
+    LATENT_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = LATENT_DIR / f"latents_{dim}.npy"
 
-    imgs = np.concatenate(batches, axis=0).astype(np.float32)
-    imgs = (imgs / 127.5) - 1.0  # [0,255] → [-1,1]
-    return imgs
+    tf = transforms.Compose([transforms.ToTensor()])  # → [0, 1], matches step0 training
+    dataset = datasets.CIFAR10(root="data", train=True, download=True, transform=tf)
+    loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False,
+                         num_workers=2, pin_memory=True)
+
+    model = load_ae(dim, device)
+
+    all_latents = []
+    with torch.no_grad():
+        for imgs, _ in tqdm(loader, desc=f"  Encoding (dim={dim})"):
+            imgs = imgs.to(device)
+            z    = model.encode(imgs)
+            all_latents.append(z.cpu().numpy())
+
+    latents = np.concatenate(all_latents, axis=0).astype(np.float32)
+    print(f"  Latents shape : {latents.shape}")
+    print(f"  Value range   : [{latents.min():.3f}, {latents.max():.3f}]")
+    np.save(out_path, latents)
+    print(f"  Saved → {out_path}")
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dim", type=int, choices=LATENT_DIMS, default=None,
-                        help="Single latent dim to extract. Omit to extract all.")
+    parser.add_argument("--dim", type=int, choices=LATENT_DIMS,
+                        help="Single latent dim to extract (omit for all dims sequentially)")
     args = parser.parse_args()
 
-    dims = [args.dim] if args.dim is not None else LATENT_DIMS
-
-    from models.autoencoder_jax import (
-        download_checkpoints,
-        load_autoencoder,
-        encode_dataset,
-    )
-
-    Path(LATENT_DIR).mkdir(parents=True, exist_ok=True)
-
-    # Download phlippe checkpoints (64/128/256/384 only)
-    download_checkpoints(CKPT_DIR)
-
-    # Load CIFAR-10 once
-    print("\nLoading CIFAR-10 training set …")
-    images = get_cifar10_numpy()
-    print(f"  images shape: {images.shape}  range: [{images.min():.2f}, {images.max():.2f}]")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dims   = [args.dim] if args.dim else LATENT_DIMS
 
     for dim in dims:
-        out_path = Path(LATENT_DIR) / f"latents_{dim}.npy"
-        if out_path.exists():
-            print(f"\n[skip] latents_{dim}.npy already exists.")
-            continue
-
-        ckpt_path = Path(CKPT_DIR) / CHECKPOINT_NAMES[dim]
-        if not ckpt_path.exists():
-            print(f"\n[ERROR] {ckpt_path} not found — run step0 first for dim={dim}.")
-            continue
-
-        print(f"\n{'='*60}")
-        print(f"  latent_dim = {dim}")
-        print(f"  checkpoint  = {ckpt_path}")
-
-        model, params = load_autoencoder(str(ckpt_path), latent_dim=dim)
-
-        print("  Encoding CIFAR-10 …")
-        latents = encode_dataset(model, params, images, batch_size=BATCH_SIZE)
-
-        print(f"  latents shape : {latents.shape}")
-        print(f"  latents range : [{latents.min():.3f}, {latents.max():.3f}]")
-
-        np.save(out_path, latents)
-        print(f"  Saved → {out_path}")
-
-        # Sanity check
-        from models.autoencoder_jax import decode_latents
-        recon = decode_latents(model, params, latents[:8], batch_size=8)
-        assert recon.shape == (8, 32, 32, 3)
-        print(f"  Decode sanity check passed: {recon.shape} uint8")
-
-    print("\nStep 1 complete.")
+        extract_latents(dim, device)
 
 
 if __name__ == "__main__":

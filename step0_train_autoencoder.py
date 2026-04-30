@@ -1,231 +1,106 @@
 """
-Step 0 — Train JAX/Flax autoencoders for custom latent dimensions.
+Step 0 — Train ConvAutoencoder from scratch on CIFAR-10 for each latent dim.
 
-Trains autoencoders for latent dims not provided by phlippe's checkpoints.
-Uses the same architecture as the UvA Tutorial 9 autoencoder.
+Saves: checkpoints/ae_{dim}.pt  (state_dict + latent_dim)
 
-Output files
-------------
-checkpoints/cifar10_{dim}_custom.ckpt   for each dim in CUSTOM_DIMS
+Usage:
+    python step0_train_autoencoder.py            # all dims sequentially
+    python step0_train_autoencoder.py --dim 64   # single dim (for parallel runs)
 """
 
-import os
-import numpy as np
-from pathlib import Path
-from tqdm import tqdm
 import argparse
-
-import jax
-import jax.numpy as jnp
-import flax.linen as nn
-import optax
-from flax.training import train_state
-import flax
+from pathlib import Path
 
 import torch
-import torchvision
-import torchvision.transforms as T
+import torch.nn as nn
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+from tqdm import tqdm
 
-# ── configuration ─────────────────────────────────────────────────────────────
-CUSTOM_DIMS  = [8, 16, 32]
-C_HID        = 32
-EPOCHS       = 500
+from models.autoencoder import ConvAutoencoder
+
+LATENT_DIMS  = [64, 128, 256, 384]
+EPOCHS       = 150
 BATCH_SIZE   = 256
 LR           = 1e-3
-DATA_DIR     = "data"
-CKPT_DIR     = "checkpoints"
-LOG_INTERVAL = 50
+WEIGHT_DECAY = 1e-4
+GRAD_CLIP    = 1.0
+CKPT_DIR     = Path("checkpoints")
 
 
-# ── data ──────────────────────────────────────────────────────────────────────
-
-def get_cifar10_numpy():
-    import pickle
-
-    # Download without any transform
-    torchvision.datasets.CIFAR10(root=DATA_DIR, train=True, download=True, transform=None)
-    torchvision.datasets.CIFAR10(root=DATA_DIR, train=False, download=True, transform=None)
-
-    cifar_dir = os.path.join(DATA_DIR, 'cifar-10-batches-py')
-
-    def load_batch(path):
-        with open(path, 'rb') as f:
-            d = pickle.load(f, encoding='latin1')
-        return d['data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
-
-    train_batches = []
-    for i in range(1, 6):
-        train_batches.append(load_batch(os.path.join(cifar_dir, f'data_batch_{i}')))
-    train_imgs = np.concatenate(train_batches, axis=0).astype(np.float32) / 127.5 - 1.0
-    test_imgs  = load_batch(os.path.join(cifar_dir, 'test_batch')).astype(np.float32) / 127.5 - 1.0
-
-    return train_imgs, test_imgs
-
-# ── model ──────────────────────────────────────────────────────────────────────
-
-class Encoder(nn.Module):
-    c_hid: int
-    latent_dim: int
-
-    @nn.compact
-    def __call__(self, x):
-        x = nn.Conv(self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)
-        x = nn.gelu(x)
-        x = nn.Conv(self.c_hid, kernel_size=(3, 3))(x)
-        x = nn.gelu(x)
-        x = nn.Conv(2 * self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)
-        x = nn.gelu(x)
-        x = nn.Conv(2 * self.c_hid, kernel_size=(3, 3))(x)
-        x = nn.gelu(x)
-        x = nn.Conv(2 * self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)
-        x = nn.gelu(x)
-        x = x.reshape(x.shape[0], -1)
-        x = nn.Dense(self.latent_dim)(x)
-        return x
+def get_cifar10_loader(batch_size: int) -> DataLoader:
+    tf = transforms.Compose([
+        transforms.ToTensor(),   # → [0, 1]
+    ])
+    dataset = datasets.CIFAR10(root="data", train=True, download=True, transform=tf)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True,
+                      num_workers=2, pin_memory=True)
 
 
-class Decoder(nn.Module):
-    c_out: int
-    c_hid: int
-    latent_dim: int
-
-    @nn.compact
-    def __call__(self, x):
-        x = nn.Dense(2 * 16 * self.c_hid)(x)
-        x = nn.gelu(x)
-        x = x.reshape(x.shape[0], 4, 4, -1)
-        x = nn.ConvTranspose(2 * self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)
-        x = nn.gelu(x)
-        x = nn.Conv(2 * self.c_hid, kernel_size=(3, 3))(x)
-        x = nn.gelu(x)
-        x = nn.ConvTranspose(self.c_hid, kernel_size=(3, 3), strides=(2, 2))(x)
-        x = nn.gelu(x)
-        x = nn.Conv(self.c_hid, kernel_size=(3, 3))(x)
-        x = nn.gelu(x)
-        x = nn.ConvTranspose(self.c_out, kernel_size=(3, 3), strides=(2, 2))(x)
-        x = nn.tanh(x)
-        return x
-
-
-class Autoencoder(nn.Module):
-    c_hid: int
-    latent_dim: int
-
-    def setup(self):
-        self.encoder = Encoder(c_hid=self.c_hid, latent_dim=self.latent_dim)
-        self.decoder = Decoder(c_hid=self.c_hid, latent_dim=self.latent_dim, c_out=3)
-
-    def __call__(self, x):
-        return self.decoder(self.encoder(x))
-
-    def encode(self, x):
-        return self.encoder(x)
-
-    def decode(self, z):
-        return self.decoder(z)
-
-
-# ── training ───────────────────────────────────────────────────────────────────
-
-def mse_loss(params, apply_fn, batch):
-    recon = apply_fn(params, batch)
-    return jnp.mean((recon - batch) ** 2)
-
-
-@jax.jit
-def train_step(state, batch):
-    loss, grads = jax.value_and_grad(mse_loss)(state.params, state.apply_fn, batch)
-    state = state.apply_gradients(grads=grads)
-    return state, loss
-
-
-@jax.jit
-def eval_step(state, batch):
-    return mse_loss(state.params, state.apply_fn, batch)
-
-
-def train_autoencoder(dim: int, train_imgs: np.ndarray, test_imgs: np.ndarray):
+def train_one_dim(dim: int, device: torch.device) -> None:
     print(f"\n{'='*60}")
-    print(f"  Training autoencoder  latent_dim = {dim}")
+    print(f"Training ConvAutoencoder  latent_dim={dim}  device={device}")
+    print(f"{'='*60}")
 
-    out_path = Path(CKPT_DIR) / f"cifar10_{dim}_custom.ckpt"
-    if out_path.exists():
-        print(f"  [skip] {out_path.name} already exists.")
-        return
+    CKPT_DIR.mkdir(parents=True, exist_ok=True)
+    save_path = CKPT_DIR / f"ae_{dim}.pt"
 
-    # Init model
-    model = Autoencoder(c_hid=C_HID, latent_dim=dim)
-    key  = jax.random.PRNGKey(42)
-    dummy = jnp.ones((1, 32, 32, 3))
-    params = model.init(key, dummy)
+    loader = get_cifar10_loader(BATCH_SIZE)
+    model  = ConvAutoencoder(latent_dim=dim).to(device)
+    opt    = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    sched  = CosineAnnealingLR(opt, T_max=EPOCHS)
+    loss_fn = nn.MSELoss()
 
-    # Optimizer
-    tx = optax.adam(LR)
-    state = train_state.TrainState.create(
-        apply_fn=model.apply,
-        params=params,
-        tx=tx,
-    )
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Parameters: {n_params:,}")
 
-    N = len(train_imgs)
-    best_val_loss = float("inf")
-    best_params = state.params
+    best_loss = float("inf")
 
-    for epoch in tqdm(range(1, EPOCHS + 1), desc=f"dim={dim}"):
-        # Shuffle
-        perm = np.random.permutation(N)
-        train_loss = 0.0
-        steps = 0
+    for epoch in range(1, EPOCHS + 1):
+        model.train()
+        total_loss = 0.0
+        n_batches  = 0
 
-        for start in range(0, N, BATCH_SIZE):
-            batch = jnp.array(train_imgs[perm[start:start + BATCH_SIZE]])
-            state, loss = train_step(state, batch)
-            train_loss += float(loss)
-            steps += 1
+        for imgs, _ in tqdm(loader, desc=f"  Epoch {epoch}/{EPOCHS}", leave=False):
+            imgs = imgs.to(device)
+            recon = model(imgs)
+            loss  = loss_fn(recon, imgs)
 
-        train_loss /= steps
+            opt.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+            opt.step()
 
-        # Validation
-        val_loss = 0.0
-        val_steps = 0
-        for start in range(0, len(test_imgs), BATCH_SIZE):
-            batch = jnp.array(test_imgs[start:start + BATCH_SIZE])
-            val_loss += float(eval_step(state, batch))
-            val_steps += 1
-        val_loss /= val_steps
+            total_loss += loss.item()
+            n_batches  += 1
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_params   = state.params
+        sched.step()
+        avg_loss = total_loss / n_batches
 
-        if epoch % LOG_INTERVAL == 0:
-            print(f"  epoch {epoch:03d}  train={train_loss:.5f}  val={val_loss:.5f}  best={best_val_loss:.5f}")
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            torch.save({"latent_dim": dim, "state_dict": model.state_dict()}, save_path)
 
-    # Save best params
-    Path(CKPT_DIR).mkdir(parents=True, exist_ok=True)
-    with open(out_path, "wb") as f:
-        f.write(flax.serialization.to_bytes(best_params["params"]))
-    print(f"  Saved → {out_path}  (best_val_loss={best_val_loss:.5f})")
+        if epoch % 10 == 0 or epoch == 1:
+            print(f"  Epoch {epoch:3d}/{EPOCHS}  loss={avg_loss:.6f}  lr={sched.get_last_lr()[0]:.2e}"
+                  f"{'  [saved]' if avg_loss == best_loss else ''}")
 
+    print(f"Done. Best loss={best_loss:.6f}  →  {save_path}")
 
-# ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dim", type=int, choices=CUSTOM_DIMS, default=None,
-                        help="Single latent dim to train. Omit to train all.")
+    parser.add_argument("--dim", type=int, choices=LATENT_DIMS,
+                        help="Single latent dim to train (omit for all dims sequentially)")
     args = parser.parse_args()
 
-    dims = [args.dim] if args.dim is not None else CUSTOM_DIMS
-
-    print("Loading CIFAR-10...")
-    train_imgs, test_imgs = get_cifar10_numpy()
-    print(f"  train: {train_imgs.shape}  test: {test_imgs.shape}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dims   = [args.dim] if args.dim else LATENT_DIMS
 
     for dim in dims:
-        train_autoencoder(dim, train_imgs, test_imgs)
-
-    print("\nStep 0 complete.")
+        train_one_dim(dim, device)
 
 
 if __name__ == "__main__":
