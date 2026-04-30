@@ -90,17 +90,25 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     print(f"Done. Best loss={best_loss:.6f}  →  {save_path}")
 
 
+def get_device(dim: int = None) -> torch.device:
+    if torch.cuda.is_available():
+        if dim is not None:
+            gpu_id = LATENT_DIMS.index(dim) % torch.cuda.device_count()
+            return torch.device(f"cuda:{gpu_id}")
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dim", type=int, choices=LATENT_DIMS,
                         help="Single latent dim to train (omit for all dims sequentially)")
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dims   = [args.dim] if args.dim else LATENT_DIMS
+    dims = [args.dim] if args.dim else LATENT_DIMS
 
     for dim in dims:
-        train_one_dim(dim, device)
+        train_one_dim(dim, get_device(dim))
 
 
 if __name__ == "__main__":
