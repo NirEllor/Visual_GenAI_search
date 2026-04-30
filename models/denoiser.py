@@ -1,5 +1,5 @@
 """
-MLP-based denoiser models for latent diffusion (PyTorch).
+MLP-based velocity networks for latent flow matching (PyTorch).
 
 TeacherDenoiser : 4 residual blocks, hidden_dim=512  (~large)
 StudentDenoiser : 2 residual blocks, hidden_dim=256  (~4x fewer params)
@@ -7,9 +7,9 @@ StudentDenoiser : 2 residual blocks, hidden_dim=256  (~4x fewer params)
 Both share the same interface:
     out = model(x_t, t)
 where
-    x_t : (B, latent_dim)  noisy latent at timestep t
-    t   : (B,)             integer timestep indices
-    out : (B, latent_dim)  predicted noise ε
+    x_t : (B, latent_dim)  interpolated latent at time t
+    t   : (B,)             continuous time in [0, 1]
+    out : (B, latent_dim)  predicted velocity v_theta(x_t, t)
 """
 
 import math
@@ -114,14 +114,14 @@ class MLPDenoiser(nn.Module):
         """
         Parameters
         ----------
-        x : (B, latent_dim)   noisy latent
-        t : (B,)              integer timestep in [0, T-1]
+        x : (B, latent_dim)  interpolated latent
+        t : (B,)             continuous time in [0, 1]
 
         Returns
         -------
-        eps : (B, latent_dim)  predicted noise
+        v : (B, latent_dim)  predicted velocity
         """
-        t_emb = self.time_embed(t)             # (B, time_emb_dim)
+        t_emb = self.time_embed(t * 1000)      # scale to match embedding frequency range
         h = self.input_proj(x)                 # (B, hidden_dim)
         for block in self.blocks:
             h = block(h, t_emb)

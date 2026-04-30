@@ -1,5 +1,5 @@
 """
-Step 3 — Distil each teacher into a smaller student model.
+Step 3 — Distil each flow matching teacher into a smaller student model.
 """
 
 import argparse
@@ -17,11 +17,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from models.diffusion import DiffusionSchedule
+from models.diffusion import FlowMatching
 from models.denoiser import TeacherDenoiser, StudentDenoiser, load_teacher, param_count
 
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
-T                  = 1000
 EPOCHS             = 700
 BATCH_SIZE         = 256
 LR                 = 1e-4
@@ -49,7 +48,7 @@ def plot_combined_losses(
     teacher_history: list,
     student_history: dict,
     dim: int,
-    results_dir: str = "results/frozen_AE",
+    results_dir: str = "results/trained_AE",
 ) -> None:
     Path(results_dir).mkdir(parents=True, exist_ok=True)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
@@ -64,9 +63,9 @@ def plot_combined_losses(
 
     # Student subplot
     epochs_s = range(1, len(student_history["total"]) + 1)
-    ax2.plot(epochs_s, student_history["total"],   label="Total",   color="crimson",    linewidth=1.5)
-    ax2.plot(epochs_s, student_history["ddpm"],    label="DDPM",    color="darkorange",  linewidth=1.2, linestyle="--")
-    ax2.plot(epochs_s, student_history["distill"], label="Distill", color="seagreen",    linewidth=1.2, linestyle="--")
+    ax2.plot(epochs_s, student_history["total"],   label="Total",   color="crimson",   linewidth=1.5)
+    ax2.plot(epochs_s, student_history["flow"],    label="Flow",    color="darkorange", linewidth=1.2, linestyle="--")
+    ax2.plot(epochs_s, student_history["distill"], label="Distill", color="seagreen",   linewidth=1.2, linestyle="--")
     ax2.set_xlabel("Epoch")
     ax2.set_ylabel("MSE Loss")
     ax2.set_title(f"Student — Training Loss  (dim={dim})")
@@ -103,45 +102,43 @@ def update_ema(ema_model, model, decay=EMA_DECAY):
             ema_p.data.mul_(decay).add_(p.data, alpha=1 - decay)
 
 
-def train_one_epoch(student, ema_student, teacher, loader, diffusion, optimizer, device, epoch):
+def train_one_epoch(student, ema_student, teacher, loader, flow, optimizer, device, epoch):
     student.train()
-    total_loss = total_ddpm_loss = total_dist_loss = 0.0
+    total_loss = total_flow_loss = total_dist_loss = 0.0
 
     for batch_idx, (x_0,) in enumerate(loader):
         x_0 = x_0.to(device)
-        B   = x_0.shape[0]
 
-        t = torch.randint(0, diffusion.T, (B,), device=device, dtype=torch.long)
-        x_t, noise = diffusion.q_sample(x_0, t)
+        x_t, t, v_target = flow.forward(x_0)
 
-        eps_student = student(x_t, t)
-        ddpm_loss   = F.mse_loss(eps_student, noise)
+        v_student = student(x_t, t)
+        flow_loss = F.mse_loss(v_student, v_target)
 
         with torch.no_grad():
-            eps_teacher = teacher(x_t, t)
-        dist_loss = F.mse_loss(eps_student, eps_teacher)
+            v_teacher = teacher(x_t, t)
+        dist_loss = F.mse_loss(v_student, v_teacher)
 
-        loss = ALPHA * ddpm_loss + (1.0 - ALPHA) * dist_loss
+        loss = ALPHA * flow_loss + (1.0 - ALPHA) * dist_loss
 
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(student.parameters(), GRAD_CLIP)
         optimizer.step()
-        update_ema(ema_student, student)  # ← EMA update
+        update_ema(ema_student, student)
 
         total_loss      += loss.item()
-        total_ddpm_loss += ddpm_loss.item()
+        total_flow_loss += flow_loss.item()
         total_dist_loss += dist_loss.item()
 
         if (batch_idx + 1) % LOG_INTERVAL == 0:
             n = batch_idx + 1
             print(f"    [ep {epoch:03d} step {n:04d}]"
                   f"  total={total_loss/n:.5f}"
-                  f"  ddpm={total_ddpm_loss/n:.5f}"
+                  f"  flow={total_flow_loss/n:.5f}"
                   f"  dist={total_dist_loss/n:.5f}", flush=True)
 
     n = len(loader)
-    return total_loss / n, total_ddpm_loss / n, total_dist_loss / n
+    return total_loss / n, total_flow_loss / n, total_dist_loss / n
 
 
 def main():
@@ -154,7 +151,7 @@ def main():
     print(f"Device: {device}  |  dims: {dims}")
     Path(MODEL_DIR).mkdir(parents=True, exist_ok=True)
 
-    diffusion = DiffusionSchedule(T=T, device=device)
+    flow = FlowMatching(device=device)
 
     for dim in dims:
         out_path = Path(MODEL_DIR) / f"student_{dim}.pt"
@@ -192,35 +189,34 @@ def main():
         scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=LR * 0.01)
 
         best_loss = float("inf")
-        history   = {"total": [], "ddpm": [], "distill": []}
+        history   = {"total": [], "flow": [], "distill": []}
 
         for epoch in tqdm(range(1, EPOCHS + 1), desc=f"dim={dim}"):
-            avg_total, avg_ddpm, avg_dist = train_one_epoch(
-                student, ema_student, teacher, loader, diffusion, optimizer, device, epoch
+            avg_total, avg_flow, avg_dist = train_one_epoch(
+                student, ema_student, teacher, loader, flow, optimizer, device, epoch
             )
             scheduler.step()
 
             history["total"].append(avg_total)
-            history["ddpm"].append(avg_ddpm)
+            history["flow"].append(avg_flow)
             history["distill"].append(avg_dist)
 
             if avg_total < best_loss:
                 best_loss = avg_total
 
             print(f"  epoch {epoch:03d}  total={avg_total:.5f}"
-                  f"  ddpm={avg_ddpm:.5f}  dist={avg_dist:.5f}"
+                  f"  flow={avg_flow:.5f}  dist={avg_dist:.5f}"
                   f"  best={best_loss:.5f}")
 
         torch.save(
             {
-                "model_state_dict":   ema_student.state_dict(),  # ← EMA
-                "latent_dim":         dim,
-                "latent_mean":        float(mean),
-                "latent_std":         float(std),
-                "T":                  T,
-                "student_ddim_steps": STUDENT_DDIM_STEPS,
-                "alpha":              ALPHA,
-                "loss_history":       history,
+                "model_state_dict":      ema_student.state_dict(),
+                "latent_dim":            dim,
+                "latent_mean":           float(mean),
+                "latent_std":            float(std),
+                "student_euler_steps":   STUDENT_DDIM_STEPS,
+                "alpha":                 ALPHA,
+                "loss_history":          history,
             },
             out_path,
         )

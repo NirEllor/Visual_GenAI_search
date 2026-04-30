@@ -32,7 +32,7 @@ RESULTS_DIR        = Path("results/trained_AE")
 
 def generate_only(dim: int) -> None:
     import torch
-    from models.diffusion import DiffusionSchedule
+    from models.diffusion import FlowMatching
     from models.denoiser import load_student
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -44,18 +44,18 @@ def generate_only(dim: int) -> None:
         print(f"[ERROR] {student_path} not found — run step3 first.")
         return
 
-    diffusion  = DiffusionSchedule(T=1000, device=device)
-    student    = load_student(str(student_path), latent_dim=dim, device=device)
-    ckpt       = torch.load(str(student_path), map_location="cpu", weights_only=True)
-    lat_mean   = float(ckpt["latent_mean"])
-    lat_std    = float(ckpt["latent_std"])
-    ddim_steps = int(ckpt.get("student_ddim_steps", STUDENT_DDIM_STEPS))
+    flow        = FlowMatching(device=device)
+    student     = load_student(str(student_path), latent_dim=dim, device=device)
+    ckpt        = torch.load(str(student_path), map_location="cpu", weights_only=True)
+    lat_mean    = float(ckpt["latent_mean"])
+    lat_std     = float(ckpt["latent_std"])
+    euler_steps = int(ckpt.get("student_euler_steps", STUDENT_DDIM_STEPS))
 
-    print(f"  Generating {N_SAMPLES} samples with DDIM-{ddim_steps} …")
+    print(f"  Generating {N_SAMPLES} samples with Euler-{euler_steps} …")
     all_latents, generated = [], 0
     while generated < N_SAMPLES:
         n_batch = min(512, N_SAMPLES - generated)
-        z = diffusion.ddim_sample(student, (n_batch, dim), n_steps=ddim_steps, eta=0.0)
+        z = flow.euler_sample(student, (n_batch, dim), n_steps=euler_steps)
         all_latents.append(z.cpu().numpy())
         generated += n_batch
 

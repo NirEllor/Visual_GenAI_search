@@ -1,5 +1,5 @@
 """
-Step 2 — Train DDPM teacher diffusion models in latent space.
+Step 2 — Train flow matching teacher models in latent space.
 """
 
 import argparse
@@ -17,11 +17,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from models.diffusion import DiffusionSchedule
+from models.diffusion import FlowMatching
 from models.denoiser import TeacherDenoiser, param_count
 
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
-T            = 1000
 EPOCHS       = 1000
 BATCH_SIZE   = 256
 LR           = 3e-4
@@ -68,7 +67,7 @@ def update_ema(ema_model, model, decay=EMA_DECAY):
             ema_p.data.mul_(decay).add_(p.data, alpha=1 - decay)
 
 
-def plot_teacher_loss(history: list, dim: int, results_dir: str = "results/frozen_AE") -> None:
+def plot_teacher_loss(history: list, dim: int, results_dir: str = "results/trained_AE") -> None:
     Path(results_dir).mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(range(1, len(history) + 1), history, color="royalblue", linewidth=1.5)
@@ -83,23 +82,21 @@ def plot_teacher_loss(history: list, dim: int, results_dir: str = "results/froze
     print(f"  Loss curve → {out}")
 
 
-def train_one_epoch(model, ema_model, loader, diffusion, optimizer, device, epoch):
+def train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch):
     model.train()
     total_loss = 0.0
     for batch_idx, (x_0,) in enumerate(loader):
         x_0 = x_0.to(device)
-        B = x_0.shape[0]
 
-        t = torch.randint(0, diffusion.T, (B,), device=device, dtype=torch.long)
-        x_t, noise = diffusion.q_sample(x_0, t)
-        eps_pred = model(x_t, t)
-        loss = F.mse_loss(eps_pred, noise)
+        x_t, t, v_target = flow.forward(x_0)
+        v_pred = model(x_t, t)
+        loss = F.mse_loss(v_pred, v_target)
 
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
         optimizer.step()
-        update_ema(ema_model, model)  # ← EMA update
+        update_ema(ema_model, model)
 
         total_loss += loss.item()
 
@@ -120,7 +117,7 @@ def main():
     print(f"Device: {device}  |  dims: {dims}")
     Path(MODEL_DIR).mkdir(parents=True, exist_ok=True)
 
-    diffusion = DiffusionSchedule(T=T, device=device)
+    flow = FlowMatching(device=device)
 
     for dim in dims:
         out_path = Path(MODEL_DIR) / f"teacher_{dim}.pt"
@@ -139,7 +136,7 @@ def main():
                              num_workers=2, pin_memory=(device == "cuda"))
 
         model     = TeacherDenoiser(latent_dim=dim).to(device)
-        ema_model = create_ema(model, device)  # ← create EMA
+        ema_model = create_ema(model, device)
         print(f"  Model params: {param_count(model)}")
 
         optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
@@ -149,7 +146,7 @@ def main():
         history   = []
 
         for epoch in tqdm(range(1, EPOCHS + 1), desc=f"dim={dim}"):
-            avg_loss = train_one_epoch(model, ema_model, loader, diffusion, optimizer, device, epoch)
+            avg_loss = train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch)
             scheduler.step()
             history.append(avg_loss)
 
@@ -158,17 +155,16 @@ def main():
 
             if epoch % SAVE_EVERY == 0:
                 interim = Path(MODEL_DIR) / f"teacher_{dim}_ep{epoch:03d}.pt"
-                torch.save({"model_state_dict": ema_model.state_dict()}, interim)  # ← EMA
+                torch.save({"model_state_dict": ema_model.state_dict()}, interim)
 
             print(f"  epoch {epoch:03d}  avg_loss={avg_loss:.5f}  best={best_loss:.5f}")
 
         torch.save(
             {
-                "model_state_dict": ema_model.state_dict(),  # ← EMA
+                "model_state_dict": ema_model.state_dict(),
                 "latent_dim":       dim,
                 "latent_mean":      float(mean),
                 "latent_std":       float(std),
-                "T":                T,
                 "loss_history":     history,
             },
             out_path,
