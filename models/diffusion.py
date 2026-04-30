@@ -19,6 +19,7 @@ Sampling (Euler, n_steps):
     return x                # t=0 = data
 """
 
+import numpy as np
 import torch
 
 
@@ -58,28 +59,39 @@ class FlowMatching:
         model: torch.nn.Module,
         shape: tuple,
         n_steps: int = 50,
-    ) -> torch.Tensor:
+        return_trajectory: bool = False,
+    ):
         """
         Euler ODE integration from t=1 (noise) to t=0 (data).
 
         Parameters
         ----------
-        model   : velocity network  v_theta(x_t, t) -> (B, D)
-        shape   : (n_samples, latent_dim)
-        n_steps : number of Euler steps
+        model             : velocity network  v_theta(x_t, t) -> (B, D)
+        shape             : (n_samples, latent_dim)
+        n_steps           : number of Euler steps
+        return_trajectory : if True, also return all intermediate states
 
         Returns
         -------
-        x : (n_samples, latent_dim)  generated samples
+        x    : (n_samples, latent_dim)              final samples
+        traj : (n_samples, n_steps+1, latent_dim)   only if return_trajectory=True
+               traj[:, 0] = x_1 (noise), traj[:, -1] = x_0 (data)
         """
         device = self.device
         x  = torch.randn(shape, device=device)
         dt = 1.0 / n_steps
+
+        if return_trajectory:
+            traj = [x.cpu().float().numpy()]
 
         for i in range(n_steps):
             t_val = 1.0 - i * dt                                 # 1.0 → dt
             t = torch.full((shape[0],), t_val, device=device)
             v = model(x, t)
             x = x - v * dt
+            if return_trajectory:
+                traj.append(x.cpu().float().numpy())
 
+        if return_trajectory:
+            return x, np.stack(traj, axis=1)                     # (N, n_steps+1, D)
         return x
