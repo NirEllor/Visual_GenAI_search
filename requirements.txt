@@ -1,24 +1,17 @@
-# JAX (CPU only — used for AE checkpoint loading and encoding/decoding)
-jax
-flax
-optax
-orbax-checkpoint
-msgpack
-
-# PyTorch (diffusion training, distillation, evaluation)
+# PyTorch (training, distillation, evaluation)
 torch
 torchvision
 
-# Utilities
+# Numerics & utilities
 numpy
 tqdm
 matplotlib
-scipy
 Pillow
 scikit-learn
-# umap-learn  # optional: pip install umap-learn  (enables --method umap)
 
-# Metrics
+# Metrics (optional — used with try/except fallback)
 clean-fid
 torch_fidelity
-lpips
+
+# Optional visualisation
+# umap-learn  # pip install umap-learn  (enables --method umap in visualize_latents.py)
