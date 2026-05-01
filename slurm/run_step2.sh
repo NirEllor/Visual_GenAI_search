@@ -17,7 +17,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=30G -c2 --time=1-00 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step2_tea_d${DIM} \
-    --wrap "bash -c '$RUN python /workspace/step2_train_teachers.py --dim $DIM'" \
+    --wrap "bash -c '$RUN python step2_train_teachers.py --dim $DIM'" \
     | awk '{print $NF}')
   echo "  Submitted step2 dim=$DIM → Job $JOB"
   IDS+=($JOB)

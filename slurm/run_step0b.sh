@@ -18,7 +18,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=30G -c2 --time=0-04 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step0b_eval_d${DIM} \
-    --wrap "bash -c '$RUN python /workspace/step0b_eval_ae.py --dim $DIM'" \
+    --wrap "bash -c '$RUN python step0b_eval_ae.py --dim $DIM'" \
     | awk '{print $NF}')
   echo "  Submitted step0b eval dim=$DIM → Job $JOB"
   EVAL_IDS+=($JOB)
@@ -30,7 +30,7 @@ JOB_PLOT=$(sbatch --dependency="$EVAL_DEP" \
   --mem=8G -c1 --time=0-01 --gres=gpu:0 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=step0b_plot \
-  --wrap "bash -c '$RUN python /workspace/step0b_eval_ae.py --plot-only'" \
+  --wrap "bash -c '$RUN python step0b_eval_ae.py --plot-only'" \
   | awk '{print $NF}')
 echo "  Submitted step0b plot → Job $JOB_PLOT"
 

@@ -20,7 +20,7 @@ for DIM in "${DIMS[@]}"; do
       --mem=30G -c2 --time=1-00 --gres=gpu:1 \
       --mail-type=ALL --mail-user="$EMAIL" \
       --job-name=step3b_stu_d${DIM}_n${SIZE} \
-      --wrap "bash -c '$RUN python /workspace/step3b_distill.py --dim $DIM --size $SIZE --load-to-ram'" \
+      --wrap "bash -c '$RUN python step3b_distill.py --dim $DIM --size $SIZE --load-to-ram'" \
       | awk '{print $NF}')
     echo "  Submitted step3b dim=$DIM size=$SIZE → Job $JOB"
     IDS+=($JOB)

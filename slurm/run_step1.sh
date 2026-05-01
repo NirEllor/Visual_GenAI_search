@@ -17,7 +17,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=30G -c2 --time=0-04 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step1_lat_d${DIM} \
-    --wrap "bash -c '$RUN python /workspace/step1_extract_latents.py --dim $DIM'" \
+    --wrap "bash -c '$RUN python step1_extract_latents.py --dim $DIM'" \
     | awk '{print $NF}')
   echo "  Submitted step1 dim=$DIM → Job $JOB"
   IDS+=($JOB)

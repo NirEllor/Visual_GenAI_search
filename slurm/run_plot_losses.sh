@@ -17,7 +17,7 @@ JOB=$(sbatch $DEP_FLAG \
   --mem=8G -c1 --time=0-01 --gres=gpu:0 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=plot_losses \
-  --wrap "bash -c '$VENV && python3 plot_losses.py'" \
+  --wrap "bash -c '$RUN python plot_losses.py'" \
   | awk '{print $NF}')
 echo "  Submitted plot_losses → Job $JOB"
 echo "plot_losses job IDs: $JOB"
