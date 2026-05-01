@@ -17,7 +17,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=30G -c2 --time=0-12 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step0_ae_d${DIM} \
-    --wrap "bash -c '$RUN python /workspace/step0_train_autoencoder.py --dim $DIM'"
+    --wrap "bash -c '$RUN python /workspace/step0_train_autoencoder.py --dim $DIM'" \
     | awk '{print $NF}')
   echo "  Submitted step0 dim=$DIM → Job $JOB"
   IDS+=($JOB)
