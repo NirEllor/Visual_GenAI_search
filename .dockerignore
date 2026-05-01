@@ -1,0 +1,12 @@
+.venv/
+.git/
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+
+# large data dirs — mount these as volumes at runtime
+latents/
+checkpoints/
+data/
+results/
