@@ -18,7 +18,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=40G -c2 --time=0-12 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step3a_gen_d${DIM} \
-    --wrap "bash -c '$VENV && python3 step3a_generate.py --dim $DIM'" \
+    --wrap "bash -c '$RUN python /workspace/step3a_generate.py --dim $DIM'" \
     | awk '{print $NF}')
   echo "  Submitted step3a dim=$DIM → Job $JOB"
   IDS+=($JOB)

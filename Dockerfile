@@ -20,4 +20,3 @@ ENV TORCH_HOME=/workspace/.cache/torch
 # Mount these at runtime: -v /host/latents:/workspace/latents etc.
 VOLUME ["/workspace/latents", "/workspace/checkpoints", "/workspace/results"]
 
-CMD ["python", "step3b_distill.py"]

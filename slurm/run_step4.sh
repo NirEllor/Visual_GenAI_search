@@ -22,7 +22,7 @@ for DIM in "${DIMS[@]}"; do
       --mem=30G -c2 --time=0-04 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_gen_d${DIM}_n${SIZE} \
-      --wrap "bash -c '$VENV && python3 step4_evaluate.py --generate --dim $DIM --size $SIZE'" \
+      --wrap "bash -c '$RUN python /workspace/step4_evaluate.py --generate --dim $DIM --size $SIZE'" \
       | awk '{print $NF}')
     GEN_IDS+=($JOB)
   done
@@ -31,7 +31,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=30G -c2 --time=0-04 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_gen_tea_d${DIM} \
-    --wrap "bash -c '$VENV && python3 step4_evaluate.py --generate --teacher --dim $DIM'" \
+    --wrap "bash -c '$RUN python /workspace/step4_evaluate.py --generate --teacher --dim $DIM'" \
     | awk '{print $NF}')
   GEN_IDS+=($JOB)
 done
@@ -49,7 +49,7 @@ for DIM in "${DIMS[@]}"; do
       --mem=30G -c2 --time=0-04 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_dec_d${DIM}_n${SIZE} \
-      --wrap "bash -c '$VENV && python3 step4_evaluate.py --decode --dim $DIM --size $SIZE'" \
+      --wrap "bash -c '$RUN python /workspace/step4_evaluate.py --decode --dim $DIM --size $SIZE'" \
       | awk '{print $NF}')
     DEC_IDS+=($JOB)
   done
@@ -58,7 +58,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=30G -c2 --time=0-04 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_dec_tea_d${DIM} \
-    --wrap "bash -c '$VENV && python3 step4_evaluate.py --decode --teacher --dim $DIM'" \
+    --wrap "bash -c '$RUN python /workspace/step4_evaluate.py --decode --teacher --dim $DIM'" \
     | awk '{print $NF}')
   DEC_IDS+=($JOB)
 done
@@ -76,7 +76,7 @@ for DIM in "${DIMS[@]}"; do
       --mem=40G -c2 --time=0-04 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_met_d${DIM}_n${SIZE} \
-      --wrap "bash -c '$VENV && export TORCH_HOME=$TORCH_HOME && python3 step4_evaluate.py --metrics --dim $DIM --size $SIZE'" \
+      --wrap "bash -c '$RUN python /workspace/step4_evaluate.py --metrics --dim $DIM --size $SIZE'" \
       | awk '{print $NF}')
     MET_IDS+=($JOB)
   done
@@ -85,7 +85,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=40G -c2 --time=0-04 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_met_tea_d${DIM} \
-    --wrap "bash -c '$VENV && export TORCH_HOME=$TORCH_HOME && python3 step4_evaluate.py --metrics --teacher --dim $DIM'" \
+    --wrap "bash -c '$RUN python /workspace/step4_evaluate.py --metrics --teacher --dim $DIM'" \
     | awk '{print $NF}')
   MET_IDS+=($JOB)
 done
@@ -98,7 +98,7 @@ JOB_PLOT=$(sbatch --dependency="$MET_DEP" \
   --mem=8G -c1 --time=0-01 --gres=gpu:0 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=step4_plot \
-  --wrap "bash -c '$VENV && export TORCH_HOME=$TORCH_HOME && python3 step4_evaluate.py --plot'" \
+  --wrap "bash -c '$RUN python /workspace/step4_evaluate.py --plot'" \
   | awk '{print $NF}')
 echo "  Submitted step4 plot → Job $JOB_PLOT"
 
