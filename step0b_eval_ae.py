@@ -67,13 +67,24 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     all_orig, all_recon = [], []
     img_idx = 0
 
+    # 🔹 MSE accumulators (on raw outputs!)
+    mse_sum = 0.0
+    n_pixels = 0
+
     with torch.no_grad():
         for imgs, _ in tqdm(loader, desc=f"  Reconstructing (dim={dim})"):
             imgs  = imgs.to(device)
-            recon = model(imgs).clamp(0, 1)
+            recon = model(imgs)
+
+            # ✅ true MSE (before clamp!)
+            mse_sum += torch.sum((recon - imgs) ** 2).item()
+            n_pixels += imgs.numel()
+
+            # 🔹 only for visualization / FID
+            recon_vis = recon.clamp(0, 1)
 
             orig_np  = (imgs.cpu().numpy().transpose(0, 2, 3, 1) * 255).astype(np.uint8)
-            recon_np = (recon.cpu().numpy().transpose(0, 2, 3, 1) * 255).astype(np.uint8)
+            recon_np = (recon_vis.cpu().numpy().transpose(0, 2, 3, 1) * 255).astype(np.uint8)
 
             all_orig.append(orig_np)
             all_recon.append(recon_np)
@@ -84,26 +95,29 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
 
     print(f"  Saved {img_idx} reconstructed images → {out_dir}/")
 
-    # ── sample grid: original | reconstructed ────────────────────────────────
+    # ── sample grid ─────────────────────────────────────────────────────────
     orig_all  = np.concatenate(all_orig,  axis=0)
     recon_all = np.concatenate(all_recon, axis=0)
     save_sample_grid(orig_all, recon_all, dim)
 
-    # ── MSE ──────────────────────────────────────────────────────────────────
-    mse = float(np.mean((orig_all.astype(np.float32) - recon_all.astype(np.float32)) ** 2))
-    print(f"  MSE (pixel, 0-255 scale): {mse:.4f}")
+    # ── MSE (correct computation) ───────────────────────────────────────────
+    mse_01  = mse_sum / n_pixels
+    mse_255 = mse_01 * (255 ** 2)
 
-    # ── FID ──────────────────────────────────────────────────────────────────
+    print(f"  MSE (raw, 0-1 scale):   {mse_01:.6f}")
+    print(f"  MSE (raw, 0-255 scale): {mse_255:.4f}")
+
+    # ── FID ─────────────────────────────────────────────────────────────────
     fid_score = compute_fid(str(out_dir))
     print(f"  FID: {fid_score:.2f}")
 
     metrics_path = RESULTS_DIR / f"metrics_{dim}.json"
     with open(metrics_path, "w") as f:
-        json.dump({str(dim): {"fid": fid_score, "mse": mse}}, f, indent=2)
+        json.dump({str(dim): {"fid": fid_score, "mse": mse_255}}, f, indent=2)
+
     print(f"  Metrics saved → {metrics_path}")
 
     return fid_score
-
 
 def save_sample_grid(orig: np.ndarray, recon: np.ndarray, dim: int) -> None:
     n = N_GRID
