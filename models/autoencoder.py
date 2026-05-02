@@ -33,7 +33,6 @@ class ConvAutoencoder(nn.Module):
             nn.BatchNorm2d(16),
             nn.ReLU(True),
             nn.ConvTranspose2d(16, 3, kernel_size=3, stride=2, padding=1, output_padding=1),   # (3, 32, 32)
-            nn.Sigmoid(),
         )
 
     def encode(self, x):
