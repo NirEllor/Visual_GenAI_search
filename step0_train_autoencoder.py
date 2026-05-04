@@ -54,6 +54,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     sched    = CosineAnnealingLR(opt, T_max=EPOCHS)
     lpips_fn = lpips.LPIPS(net='alex').to(device)
     lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
+    mse_fn   = nn.MSELoss()
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Parameters: {n_params:,}")
@@ -70,7 +71,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             recon       = model(imgs)
             recon_lpips = recon * 2 - 1   # [0,1] → [-1,1], no clamp → full gradient flow
             imgs_lpips  = imgs  * 2 - 1
-            loss        = lpips_fn(recon_lpips, imgs_lpips).mean()
+            loss        = lpips_fn(recon_lpips, imgs_lpips).mean() + mse_fn(recon, imgs)
 
             opt.zero_grad()
             loss.backward()
@@ -88,7 +89,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             torch.save({"latent_dim": dim, "state_dict": model.state_dict()}, save_path)
 
         if epoch % 10 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{EPOCHS}  lpips={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
+            print(f"  Epoch {epoch:3d}/{EPOCHS}  loss(lpips+mse)={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
                   f"{'  [saved]' if avg_loss == best_loss else ''}")
 
     print(f"Done. Best loss={best_loss:.6f}  →  {save_path}")
