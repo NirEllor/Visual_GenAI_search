@@ -19,7 +19,7 @@ Usage:
 import argparse
 import json
 from pathlib import Path
-
+import shutil
 import lpips as lpips_lib
 import numpy as np
 import torch
@@ -59,7 +59,11 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     model    = load_ae(dim, device)
     lpips_fn = lpips_lib.LPIPS(net='alex').to(device)
     lpips_fn.eval()
-    out_dir  = RESULTS_DIR / f"reconstructed_{dim}"
+    out_dir = RESULTS_DIR / f"reconstructed_{dim}"
+
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     tf      = transforms.ToTensor()
@@ -78,15 +82,21 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     with torch.no_grad():
         for imgs, _ in tqdm(loader, desc=f"  Reconstructing (dim={dim})"):
             imgs  = imgs.to(device)
-            recon = model(imgs)
+            recon_logits = model(imgs)
+            recon = torch.sigmoid(recon_logits)
 
             mse_sum  += torch.sum((recon - imgs) ** 2).item()
             n_pixels += imgs.numel()
 
-            lpips_sum    += lpips_fn(recon * 2 - 1, imgs * 2 - 1).mean().item()
+            recon_eval = recon.clamp(0, 1)
+
+            lpips_sum += lpips_fn(
+                recon_eval * 2 - 1,
+                imgs * 2 - 1
+            ).mean().item()
             n_batches_eval += 1
 
-            recon_vis = recon.clamp(0, 1)
+            recon_vis = recon_eval
 
             orig_np  = (imgs.cpu().numpy().transpose(0, 2, 3, 1) * 255).astype(np.uint8)
             recon_np = (recon_vis.cpu().numpy().transpose(0, 2, 3, 1) * 255).astype(np.uint8)
@@ -97,6 +107,8 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
             for img_arr in recon_np:
                 Image.fromarray(img_arr).save(out_dir / f"{img_idx:05d}.png")
                 img_idx += 1
+        n_saved = len(list(out_dir.glob("*.png")))
+        assert n_saved == len(testset), f"Expected {len(testset)}, got {n_saved}"
 
     print(f"  Saved {img_idx} reconstructed images → {out_dir}/")
 

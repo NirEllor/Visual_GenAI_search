@@ -71,21 +71,27 @@ def train_one_dim(dim: int, device: torch.device) -> None:
         n_batches  = 0
 
         for imgs, _ in tqdm(loader, desc=f"  Epoch {epoch}/{EPOCHS}", leave=False):
-            imgs        = imgs.to(device)
-            recon       = model(imgs)
-            recon_lpips = recon * 2 - 1   # [0,1] → [-1,1], no clamp → full gradient flow
-            imgs_lpips  = imgs  * 2 - 1
-            lpips_loss = lpips_fn(recon_lpips, imgs_lpips).mean()
-            mse_loss = mse_fn(recon, imgs)
+            imgs = imgs.to(device)
+
+            recon_logits = model(imgs)
+            recon_for_loss = torch.sigmoid(recon_logits)
+
+            lpips_loss = lpips_fn(
+                recon_for_loss * 2 - 1,
+                imgs * 2 - 1
+            ).mean()
+
+            mse_loss = mse_fn(recon_for_loss, imgs)
 
             loss = LPIPS_WEIGHT * lpips_loss + MSE_WEIGHT * mse_loss
+
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
             opt.step()
 
             total_loss += loss.item()
-            n_batches  += 1
+            n_batches += 1
 
         sched.step()
         avg_loss = total_loss / n_batches
