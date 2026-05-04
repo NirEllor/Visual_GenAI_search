@@ -76,14 +76,14 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             recon_logits = model(imgs)
             recon_for_loss = torch.sigmoid(recon_logits)
 
-            lpips_loss = lpips_fn(
-                recon_for_loss * 2 - 1,
-                imgs * 2 - 1
-            ).mean()
+            # lpips_loss = lpips_fn(
+            #     recon_for_loss * 2 - 1,
+            #     imgs * 2 - 1
+            # ).mean()
 
-            mse_loss = l1_fn (recon_for_loss, imgs)
+            l1_loss = l1_fn (recon_for_loss, imgs)
 
-            loss = LPIPS_WEIGHT * lpips_loss + L1_WEIGHT  * mse_loss
+            loss = L1_WEIGHT  * l1_loss
 
             opt.zero_grad()
             loss.backward()
