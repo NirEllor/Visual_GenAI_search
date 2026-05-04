@@ -28,8 +28,8 @@ BATCH_SIZE   = 256
 LR           = 1e-3
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP    = 1.0
-LPIPS_WEIGHT = 1.0
-MSE_WEIGHT   = 0.1
+LPIPS_WEIGHT = 0.5
+L1_WEIGHT    = 1.0
 CKPT_DIR     = Path("checkpoints")
 
 
@@ -58,7 +58,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
     for p in lpips_fn.parameters():
         p.requires_grad = False
-    mse_fn   = nn.MSELoss()
+    l1_fn    = nn.L1Loss()
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Parameters: {n_params:,}")
@@ -81,9 +81,9 @@ def train_one_dim(dim: int, device: torch.device) -> None:
                 imgs * 2 - 1
             ).mean()
 
-            mse_loss = mse_fn(recon_for_loss, imgs)
+            mse_loss = l1_fn (recon_for_loss, imgs)
 
-            loss = LPIPS_WEIGHT * lpips_loss + MSE_WEIGHT * mse_loss
+            loss = LPIPS_WEIGHT * lpips_loss + L1_WEIGHT  * mse_loss
 
             opt.zero_grad()
             loss.backward()
