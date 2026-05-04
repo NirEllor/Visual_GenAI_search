@@ -28,8 +28,8 @@ BATCH_SIZE   = 256
 LR           = 1e-3
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP    = 1.0
-LPIPS_WEIGHT = 0.1
-L1_WEIGHT    = 1.0
+LPIPS_WEIGHT = 0.0
+L1_WEIGHT    = 1.5
 CKPT_DIR     = Path("checkpoints")
 
 
