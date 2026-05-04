@@ -11,6 +11,7 @@ Usage:
 import argparse
 from pathlib import Path
 
+import lpips
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
@@ -49,9 +50,10 @@ def train_one_dim(dim: int, device: torch.device) -> None:
 
     loader = get_cifar10_loader(BATCH_SIZE)
     model  = ConvAutoencoder(latent_dim=dim).to(device)
-    opt    = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    sched  = CosineAnnealingLR(opt, T_max=EPOCHS)
-    loss_fn = nn.MSELoss()
+    opt      = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    sched    = CosineAnnealingLR(opt, T_max=EPOCHS)
+    lpips_fn = lpips.LPIPS(net='alex').to(device)
+    lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Parameters: {n_params:,}")
@@ -64,9 +66,11 @@ def train_one_dim(dim: int, device: torch.device) -> None:
         n_batches  = 0
 
         for imgs, _ in tqdm(loader, desc=f"  Epoch {epoch}/{EPOCHS}", leave=False):
-            imgs = imgs.to(device)
-            recon = model(imgs)
-            loss  = loss_fn(recon, imgs)
+            imgs        = imgs.to(device)
+            recon       = model(imgs)
+            recon_lpips = recon * 2 - 1   # [0,1] → [-1,1], no clamp → full gradient flow
+            imgs_lpips  = imgs  * 2 - 1
+            loss        = lpips_fn(recon_lpips, imgs_lpips).mean()
 
             opt.zero_grad()
             loss.backward()
@@ -84,7 +88,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             torch.save({"latent_dim": dim, "state_dict": model.state_dict()}, save_path)
 
         if epoch % 10 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{EPOCHS}  loss={avg_loss:.6f}  lr={sched.get_last_lr()[0]:.2e}"
+            print(f"  Epoch {epoch:3d}/{EPOCHS}  lpips={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
                   f"{'  [saved]' if avg_loss == best_loss else ''}")
 
     print(f"Done. Best loss={best_loss:.6f}  →  {save_path}")

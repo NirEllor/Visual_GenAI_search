@@ -13,6 +13,7 @@ scikit-learn
 # Metrics (optional — used with try/except fallback)
 clean-fid
 torch_fidelity
+lpips
 
 # Optional visualisation
 # umap-learn  # pip install umap-learn  (enables --method umap in visualize_latents.py)

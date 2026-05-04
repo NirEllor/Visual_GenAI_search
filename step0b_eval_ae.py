@@ -20,6 +20,7 @@ import argparse
 import json
 from pathlib import Path
 
+import lpips as lpips_lib
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -55,8 +56,10 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     print(f"Evaluating AE  latent_dim={dim}  device={device}")
     print(f"{'='*60}")
 
-    model   = load_ae(dim, device)
-    out_dir = RESULTS_DIR / f"reconstructed_{dim}"
+    model    = load_ae(dim, device)
+    lpips_fn = lpips_lib.LPIPS(net='alex').to(device)
+    lpips_fn.eval()
+    out_dir  = RESULTS_DIR / f"reconstructed_{dim}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     tf      = transforms.ToTensor()
@@ -67,20 +70,22 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     all_orig, all_recon = [], []
     img_idx = 0
 
-    # 🔹 MSE accumulators (on raw outputs!)
-    mse_sum = 0.0
-    n_pixels = 0
+    mse_sum      = 0.0
+    n_pixels     = 0
+    lpips_sum    = 0.0
+    n_batches_eval = 0
 
     with torch.no_grad():
         for imgs, _ in tqdm(loader, desc=f"  Reconstructing (dim={dim})"):
             imgs  = imgs.to(device)
             recon = model(imgs)
 
-            # ✅ true MSE (before clamp!)
-            mse_sum += torch.sum((recon - imgs) ** 2).item()
+            mse_sum  += torch.sum((recon - imgs) ** 2).item()
             n_pixels += imgs.numel()
 
-            # 🔹 only for visualization / FID
+            lpips_sum    += lpips_fn(recon * 2 - 1, imgs * 2 - 1).mean().item()
+            n_batches_eval += 1
+
             recon_vis = recon.clamp(0, 1)
 
             orig_np  = (imgs.cpu().numpy().transpose(0, 2, 3, 1) * 255).astype(np.uint8)
@@ -100,12 +105,13 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     recon_all = np.concatenate(all_recon, axis=0)
     save_sample_grid(orig_all, recon_all, dim)
 
-    # ── MSE (correct computation) ───────────────────────────────────────────
-    mse_01  = mse_sum / n_pixels
-    mse_255 = mse_01 * (255 ** 2)
+    mse_01    = mse_sum / n_pixels
+    mse_255   = mse_01 * (255 ** 2)
+    avg_lpips = lpips_sum / n_batches_eval
 
     print(f"  MSE (raw, 0-1 scale):   {mse_01:.6f}")
     print(f"  MSE (raw, 0-255 scale): {mse_255:.4f}")
+    print(f"  LPIPS (AlexNet):        {avg_lpips:.4f}")
 
     # ── FID ─────────────────────────────────────────────────────────────────
     fid_score = compute_fid(str(out_dir))
@@ -113,7 +119,7 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
 
     metrics_path = RESULTS_DIR / f"metrics_{dim}.json"
     with open(metrics_path, "w") as f:
-        json.dump({str(dim): {"fid": fid_score, "mse": mse_255}}, f, indent=2)
+        json.dump({str(dim): {"fid": fid_score, "mse": mse_255, "lpips": avg_lpips}}, f, indent=2)
 
     print(f"  Metrics saved → {metrics_path}")
 
