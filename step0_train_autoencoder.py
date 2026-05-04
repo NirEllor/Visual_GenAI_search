@@ -28,6 +28,8 @@ BATCH_SIZE   = 256
 LR           = 1e-3
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP    = 1.0
+LPIPS_WEIGHT = 1.0
+MSE_WEIGHT   = 0.1
 CKPT_DIR     = Path("checkpoints")
 
 
@@ -54,6 +56,8 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     sched    = CosineAnnealingLR(opt, T_max=EPOCHS)
     lpips_fn = lpips.LPIPS(net='alex').to(device)
     lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
+    for p in lpips_fn.parameters():
+        p.requires_grad = False
     mse_fn   = nn.MSELoss()
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -71,8 +75,10 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             recon       = model(imgs)
             recon_lpips = recon * 2 - 1   # [0,1] → [-1,1], no clamp → full gradient flow
             imgs_lpips  = imgs  * 2 - 1
-            loss        = lpips_fn(recon_lpips, imgs_lpips).mean() + mse_fn(recon, imgs)
+            lpips_loss = lpips_fn(recon_lpips, imgs_lpips).mean()
+            mse_loss = mse_fn(recon, imgs)
 
+            loss = LPIPS_WEIGHT * lpips_loss + MSE_WEIGHT * mse_loss
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
