@@ -11,7 +11,7 @@ Usage:
 import argparse
 from pathlib import Path
 
-import lpips
+# import lpips
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
@@ -54,10 +54,10 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     model  = ConvAutoencoder(latent_dim=dim).to(device)
     opt      = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched    = CosineAnnealingLR(opt, T_max=EPOCHS)
-    lpips_fn = lpips.LPIPS(net='alex').to(device)
-    lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
-    for p in lpips_fn.parameters():
-        p.requires_grad = False
+    # lpips_fn = lpips.LPIPS(net='alex').to(device)
+    # lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
+    # for p in lpips_fn.parameters():
+    #     p.requires_grad = False
     l1_fn    = nn.L1Loss()
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
