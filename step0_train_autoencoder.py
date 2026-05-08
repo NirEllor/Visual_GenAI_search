@@ -23,10 +23,10 @@ from tqdm import tqdm
 from models.autoencoder import ConvAutoencoder
 
 LATENT_DIMS  = [64, 128, 256, 384, 512, 1024]
-EPOCHS       = 300
+EPOCHS       = 500
 BATCH_SIZE   = 128
 LR           = 3e-4
-WEIGHT_DECAY = 1e-4
+WEIGHT_DECAY = 0
 GRAD_CLIP    = 5.0
 LPIPS_WEIGHT = 0.2
 L1_WEIGHT    = 1.0
