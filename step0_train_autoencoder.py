@@ -11,7 +11,7 @@ Usage:
 import argparse
 from pathlib import Path
 
-# import lpips
+import lpips
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
@@ -23,13 +23,13 @@ from tqdm import tqdm
 from models.autoencoder import ConvAutoencoder
 
 LATENT_DIMS  = [64, 128, 256, 384, 512, 1024]
-EPOCHS       = 150
-BATCH_SIZE   = 256
-LR           = 1e-3
+EPOCHS       = 300
+BATCH_SIZE   = 128
+LR           = 3e-4
 WEIGHT_DECAY = 1e-4
-GRAD_CLIP    = 1.0
-LPIPS_WEIGHT = 0.0
-L1_WEIGHT    = 1.5
+GRAD_CLIP    = 5.0
+LPIPS_WEIGHT = 0.2
+L1_WEIGHT    = 1.0
 CKPT_DIR     = Path("checkpoints")
 
 
@@ -54,10 +54,10 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     model  = ConvAutoencoder(latent_dim=dim).to(device)
     opt      = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched    = CosineAnnealingLR(opt, T_max=EPOCHS)
-    # lpips_fn = lpips.LPIPS(net='alex').to(device)
-    # lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
-    # for p in lpips_fn.parameters():
-    #     p.requires_grad = False
+    lpips_fn = lpips.LPIPS(net='alex').to(device)
+    lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
+    for p in lpips_fn.parameters():
+        p.requires_grad = False
     l1_fn    = nn.L1Loss()
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -76,14 +76,14 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             recon_logits = model(imgs)
             recon_for_loss = torch.sigmoid(recon_logits)
 
-            # lpips_loss = lpips_fn(
-            #     recon_for_loss * 2 - 1,
-            #     imgs * 2 - 1
-            # ).mean()
+            lpips_loss = lpips_fn(
+                recon_for_loss * 2 - 1,
+                imgs * 2 - 1
+            ).mean()
 
-            l1_loss = l1_fn (recon_for_loss, imgs)
+            mse_loss = l1_fn (recon_for_loss, imgs)
 
-            loss = L1_WEIGHT  * l1_loss
+            loss = LPIPS_WEIGHT * lpips_loss + L1_WEIGHT  * mse_loss
 
             opt.zero_grad()
             loss.backward()
