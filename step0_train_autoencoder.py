@@ -9,26 +9,24 @@ Usage:
 """
 
 import argparse
-from pathlib import Path
-
 import lpips
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
+from pathlib import Path
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
-
 from models.autoencoder import ConvAutoencoder
 
 LATENT_DIMS  = [64, 128, 256, 384, 512, 1024]
-EPOCHS       = 500
+EPOCHS       = 1000
 BATCH_SIZE   = 128
 LR           = 3e-4
 WEIGHT_DECAY = 0
 GRAD_CLIP    = 5.0
-LPIPS_WEIGHT = 0.2
+LPIPS_WEIGHT = 0.1
 L1_WEIGHT    = 1.0
 CKPT_DIR     = Path("checkpoints")
 
