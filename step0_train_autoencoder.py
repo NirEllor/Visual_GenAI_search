@@ -21,7 +21,7 @@ from tqdm import tqdm
 from models.autoencoder import ConvAutoencoder
 
 LATENT_DIMS  = [64, 128, 256, 384, 512, 1024]
-EPOCHS       = 700
+EPOCHS       = 1000
 BATCH_SIZE   = 128
 LR           = 1e-3
 WEIGHT_DECAY = 0
