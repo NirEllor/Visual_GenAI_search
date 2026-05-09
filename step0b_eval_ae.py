@@ -74,7 +74,7 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     all_orig, all_recon = [], []
     img_idx = 0
 
-    mse_sum      = 0.0
+    l1_sum      = 0.0
     n_pixels     = 0
     lpips_sum    = 0.0
     n_batches_eval = 0
@@ -85,7 +85,7 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
             recon_logits = model(imgs)
             recon = torch.sigmoid(recon_logits)
 
-            mse_sum  += torch.sum((recon - imgs) ** 2).item()
+            l1_sum += torch.sum(torch.abs(recon - imgs)).item()
             n_pixels += imgs.numel()
 
             recon_eval = recon.clamp(0, 1)
@@ -117,12 +117,12 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     recon_all = np.concatenate(all_recon, axis=0)
     save_sample_grid(orig_all, recon_all, dim)
 
-    mse_01    = mse_sum / n_pixels
-    mse_255   = mse_01 * (255 ** 2)
+    l1_01    = l1_sum / n_pixels
+    l1_255 = l1_01 * 255
     avg_lpips = lpips_sum / n_batches_eval
 
-    print(f"  MSE (raw, 0-1 scale):   {mse_01:.6f}")
-    print(f"  MSE (raw, 0-255 scale): {mse_255:.4f}")
+    print(f"  L1 (raw, 0-1 scale):   {l1_01:.6f}")
+    print(f"  L1 (raw, 0-255 scale): {l1_255:.4f}")
     print(f"  LPIPS (AlexNet):        {avg_lpips:.4f}")
 
     # ── FID ─────────────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
 
     metrics_path = RESULTS_DIR / f"metrics_{dim}.json"
     with open(metrics_path, "w") as f:
-        json.dump({str(dim): {"fid": fid_score, "mse": mse_255, "lpips": avg_lpips}}, f, indent=2)
+        json.dump({str(dim): {"fid": fid_score, "l1": l1_255, "lpips": avg_lpips}}, f, indent=2)
 
     print(f"  Metrics saved → {metrics_path}")
 
@@ -190,7 +190,7 @@ def plot_only() -> None:
 
     valid_dims = [d for d in LATENT_DIMS if d in metrics]
     fid_scores = [metrics[d]["fid"] for d in valid_dims]
-    mse_scores = [metrics[d]["mse"] for d in valid_dims]
+    l1_scores = [metrics[d]["l1"] for d in valid_dims]
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
@@ -200,10 +200,10 @@ def plot_only() -> None:
     axes[0].set_title("AE Reconstruction FID vs Latent Dim")
     axes[0].grid(True, alpha=0.4)
 
-    axes[1].plot(valid_dims, mse_scores, marker="s", linewidth=2, color="darkorange")
+    axes[1].plot(valid_dims, l1_scores, marker="s", linewidth=2, color="darkorange")
     axes[1].set_xlabel("Latent Dim")
-    axes[1].set_ylabel("MSE (pixel, 0-255 scale) (↓)")
-    axes[1].set_title("AE Reconstruction MSE vs Latent Dim")
+    axes[1].set_ylabel("L1 (pixel, 0-255 scale) (↓)")
+    axes[1].set_title("AE Reconstruction l1 vs Latent Dim")
     axes[1].grid(True, alpha=0.4)
 
     plt.tight_layout()
@@ -214,7 +214,7 @@ def plot_only() -> None:
 
     print("\nAE evaluation summary:")
     for dim in valid_dims:
-        print(f"  dim={dim:4d}  FID={metrics[dim]['fid']:7.2f}  MSE={metrics[dim]['mse']:.4f}")
+        print(f"  dim={dim:4d}  FID={metrics[dim]['fid']:7.2f}  L1={metrics[dim]['l1']:.4f}")
 
 
 def main():
