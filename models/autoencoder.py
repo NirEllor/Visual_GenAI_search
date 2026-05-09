@@ -26,21 +26,14 @@ class ConvAutoencoder(nn.Module):
         self.decoder_fc = nn.Linear(latent_dim, self.flatten_size)
 
         self.decoder_conv = nn.Sequential(
-            # (64, 4, 4) -> (64, 8, 8) -> (32, 8, 8)
-            nn.Upsample(scale_factor=2, mode="nearest"),
-            nn.Conv2d(64, 32, kernel_size=3, padding=1),
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),  # (32, 8, 8)
             nn.BatchNorm2d(32),
             nn.ReLU(True),
-
-            # (32, 8, 8) -> (32, 16, 16) -> (16, 16, 16)
-            nn.Upsample(scale_factor=2, mode="nearest"),
-            nn.Conv2d(32, 16, kernel_size=3, padding=1),
+            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),  # (16, 16, 16)
             nn.BatchNorm2d(16),
             nn.ReLU(True),
+            nn.ConvTranspose2d(16, 3, kernel_size=3, stride=2, padding=1, output_padding=1), # (3, 32, 32)
 
-            # (16, 16, 16) -> (16, 32, 32) -> (3, 32, 32)
-            nn.Upsample(scale_factor=2, mode="nearest"),
-            nn.Conv2d(16, 3, kernel_size=3, padding=1),
         )
 
     def encode(self, x):
