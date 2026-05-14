@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
 from models.autoencoder import ConvAutoencoder
+import torch.nn.functional as F
 
 LATENT_DIMS  = [64, 128, 256, 384, 512, 1024]
 EPOCHS       = 1000
@@ -26,8 +27,8 @@ BATCH_SIZE   = 128
 LR           = 2e-3
 WEIGHT_DECAY = 0
 GRAD_CLIP    = 5.0
-LPIPS_WEIGHT = 0.1
-L1_WEIGHT    = 1.0
+LPIPS_WEIGHT = 1.0
+L1_WEIGHT    = 0.0
 CKPT_DIR     = Path("checkpoints")
 
 
@@ -52,7 +53,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     model  = ConvAutoencoder(latent_dim=dim).to(device)
     opt      = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched    = CosineAnnealingLR(opt, T_max=EPOCHS)
-    lpips_fn = lpips.LPIPS(net='alex').to(device)
+    lpips_fn = lpips.LPIPS(net='vgg').to(device)
     lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
     for p in lpips_fn.parameters():
         p.requires_grad = False
@@ -74,15 +75,28 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             recon_logits = model(imgs)
             recon_for_loss = torch.sigmoid(recon_logits)
 
+            recon_lpips = F.interpolate(
+                recon_for_loss,
+                size=(64, 64),
+                mode="bilinear",
+                align_corners=False
+            )
+
+            imgs_lpips = F.interpolate(
+                imgs,
+                size=(64, 64),
+                mode="bilinear",
+                align_corners=False
+            )
+
             lpips_loss = lpips_fn(
-                recon_for_loss * 2 - 1,
-                imgs * 2 - 1
+                recon_lpips * 2 - 1,
+                imgs_lpips * 2 - 1
             ).mean()
 
-            mse_loss = l1_fn (recon_for_loss, imgs)
+            l1_loss = l1_fn(recon_for_loss, imgs)
 
-            loss = LPIPS_WEIGHT * lpips_loss + L1_WEIGHT  * mse_loss
-
+            loss = LPIPS_WEIGHT * lpips_loss + L1_WEIGHT * l1_loss
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
@@ -99,7 +113,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             torch.save({"latent_dim": dim, "state_dict": model.state_dict()}, save_path)
 
         if epoch % 10 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{EPOCHS}  loss(lpips+mse)={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
+            print(f"  Epoch {epoch:3d}/{EPOCHS}  loss(lpips+l1)={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
                   f"{'  [saved]' if avg_loss == best_loss else ''}")
 
     print(f"Done. Best loss={best_loss:.6f}  →  {save_path}")

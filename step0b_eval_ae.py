@@ -30,7 +30,7 @@ from tqdm import tqdm
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
+import torch.nn.functional as F
 from models.autoencoder import ConvAutoencoder
 
 LATENT_DIMS  = [64, 128, 256, 384, 512, 1024]
@@ -90,11 +90,24 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
 
             recon_eval = recon.clamp(0, 1)
 
+            recon_lpips = F.interpolate(
+                recon_eval,
+                size=(64, 64),
+                mode="bilinear",
+                align_corners=False
+            )
+
+            imgs_lpips = F.interpolate(
+                imgs,
+                size=(64, 64),
+                mode="bilinear",
+                align_corners=False
+            )
+
             lpips_sum += lpips_fn(
-                recon_eval * 2 - 1,
-                imgs * 2 - 1
+                recon_lpips * 2 - 1,
+                imgs_lpips * 2 - 1
             ).mean().item()
-            n_batches_eval += 1
 
             recon_vis = recon_eval
 
