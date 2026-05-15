@@ -14,7 +14,7 @@ DEP_FLAG=""
 IDS=()
 for DIM in "${DIMS[@]}"; do
   JOB=$(sbatch $DEP_FLAG \
-    --mem=30G -c2 --time=0-12 --gres=gpu:1 \
+    --mem=30G -c2 --time=1-00 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step0_ae_d${DIM} \
     --wrap "bash -c '$RUN python step0_train_autoencoder.py --dim $DIM'" \

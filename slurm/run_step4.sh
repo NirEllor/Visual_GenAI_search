@@ -19,7 +19,7 @@ GEN_IDS=()
 for DIM in "${DIMS[@]}"; do
   for SIZE in "${SIZES[@]}"; do
     JOB=$(sbatch $DEP_FLAG \
-      --mem=30G -c2 --time=0-04 --gres=gpu:1 \
+      --mem=30G -c2 --time=1-00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_gen_d${DIM}_n${SIZE} \
       --wrap "bash -c '$RUN python step4_evaluate.py --generate --dim $DIM --size $SIZE'" \
@@ -28,7 +28,7 @@ for DIM in "${DIMS[@]}"; do
   done
 
   JOB=$(sbatch $DEP_FLAG \
-    --mem=30G -c2 --time=0-04 --gres=gpu:1 \
+    --mem=30G -c2 --time=1-00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_gen_tea_d${DIM} \
     --wrap "bash -c '$RUN python step4_evaluate.py --generate --teacher --dim $DIM'" \
@@ -46,7 +46,7 @@ DEC_IDS=()
 for DIM in "${DIMS[@]}"; do
   for SIZE in "${SIZES[@]}"; do
     JOB=$(sbatch --dependency="$GEN_DEP" \
-      --mem=30G -c2 --time=0-04 --gres=gpu:1 \
+      --mem=30G -c2 --time=1-00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_dec_d${DIM}_n${SIZE} \
       --wrap "bash -c '$RUN python step4_evaluate.py --decode --dim $DIM --size $SIZE'" \
@@ -55,7 +55,7 @@ for DIM in "${DIMS[@]}"; do
   done
 
   JOB=$(sbatch --dependency="$GEN_DEP" \
-    --mem=30G -c2 --time=0-04 --gres=gpu:1 \
+    --mem=30G -c2 --time=1-00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_dec_tea_d${DIM} \
     --wrap "bash -c '$RUN python step4_evaluate.py --decode --teacher --dim $DIM'" \
@@ -73,7 +73,7 @@ MET_IDS=()
 for DIM in "${DIMS[@]}"; do
   for SIZE in "${SIZES[@]}"; do
     JOB=$(sbatch --dependency="$DEC_DEP" \
-      --mem=40G -c2 --time=0-04 --gres=gpu:1 \
+      --mem=40G -c2 --time=1-00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_met_d${DIM}_n${SIZE} \
       --wrap "bash -c '$RUN python step4_evaluate.py --metrics --dim $DIM --size $SIZE'" \
@@ -82,7 +82,7 @@ for DIM in "${DIMS[@]}"; do
   done
 
   JOB=$(sbatch --dependency="$DEC_DEP" \
-    --mem=40G -c2 --time=0-04 --gres=gpu:1 \
+    --mem=40G -c2 --time=1-00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_met_tea_d${DIM} \
     --wrap "bash -c '$RUN python step4_evaluate.py --metrics --teacher --dim $DIM'" \
@@ -95,7 +95,7 @@ MET_DEP="afterok:$(IFS=:; echo "${MET_IDS[*]}")"
 
 # ── Phase 4: aggregate + plot (1 CPU job) ────────────────────────────────────────
 JOB_PLOT=$(sbatch --dependency="$MET_DEP" \
-  --mem=8G -c1 --time=0-01 --gres=gpu:0 \
+  --mem=8G -c1 --time=1-00 --gres=gpu:0 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=step4_plot \
   --wrap "bash -c '$RUN python step4_evaluate.py --plot'" \
