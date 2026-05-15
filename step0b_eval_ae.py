@@ -109,6 +109,8 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
                 imgs_lpips * 2 - 1
             ).mean().item()
 
+            n_batches_eval += 1
+
             recon_vis = recon_eval
 
             orig_np  = (imgs.cpu().numpy().transpose(0, 2, 3, 1) * 255).astype(np.uint8)
