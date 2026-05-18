@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-This is a research project on knowledge distillation studying how latent space dimensionality affects the FID score of distilled diffusion models. All pipeline scripts are implemented. The virtual environment is in `.venv/`.
+This is a research project on knowledge distillation studying how **latent space dimensionality** and **synthetic dataset size** affect the FID score of distilled flow matching models on CIFAR-10. All pipeline scripts are implemented. The virtual environment is in `.venv/`.
 
 ## Repository
 
@@ -30,116 +30,158 @@ git push
 
 ---
 
-## Research Plan: Knowledge Distillation Pipeline for Latent Diffusion on CIFAR-10
+## Research Plan: Knowledge Distillation Pipeline for Latent Flow Matching on CIFAR-10
 
-**Goal:** Study how latent space dimensionality (64, 128, 256, 384) affects the FID score of distilled diffusion models.
+**Goal:** Study how latent space dimensionality (64, 128, 256, 384, 512, 1024) and synthetic dataset size (250k, 500k, 1M, 2M) affect the FID score of distilled flow matching models.
+
+**Distillation approach:** Dataset distillation — the teacher generates large synthetic latent datasets via Euler sampling; students are trained from scratch on this synthetic data using a pure flow matching loss.
+
+### Generative Model: Rectified Flow / Flow Matching
+
+All generative models use **Flow Matching** (Rectified Flow), not DDPM. Implemented in `models/diffusion.py`:
+
+- **Training**: straight-line interpolation `x_t = (1-t)*x_0 + t*x_1`, constant velocity target `v = x_1 - x_0`, loss `MSE(v_theta(x_t, t), v)`
+- **Sampling**: Euler ODE integration from `t=1` (noise) → `t=0` (data), 50 steps
+- Both teacher and student predict velocity `v_theta(x_t, t) → (B, D)`
+
+### Autoencoder
+
+Custom PyTorch `ConvAutoencoder` (`models/autoencoder.py`):
+- 3-layer strided conv encoder: `(3,32,32)` → `(64,4,4)` → FC → `latent_dim`
+- 3-layer transposed conv decoder (mirror of encoder)
+- Trained from scratch in Step 0 using LPIPS (VGG) loss
 
 ### File Structure
 
 ```
 Guided_Research/
 ├── requirements.txt
-├── checkpoints/              # Downloaded .ckpt files (gitignored)
-├── data/                     # Auto-downloaded CIFAR-10
-├── latents/                  # latents_64.npy, latents_128.npy, ...
+├── checkpoints/                     # ae_{dim}.pt — trained PyTorch autoencoders
+├── data/                            # Auto-downloaded CIFAR-10
+├── latents/                         # latents_{dim}.npy, latents_{dim}_norm_stats.npy
+├── synthetic/                       # synthetic/{dim}/synthetic_{dim}_{n}.npy + trajectories
 ├── models/
-│   ├── autoencoder_jax.py    # JAX/Flax AE architecture (matches Tutorial 9)
-│   ├── diffusion.py          # DDPM noise schedule + sampling utilities
-│   └── denoiser.py           # MLP denoiser (teacher & student variants)
-├── step1_extract_latents.py
-├── step2_train_teachers.py
-├── step3_distill_students.py
-├── step4_evaluate.py
-└── results/                  # Saved metrics, plots, generated images
+│   ├── autoencoder.py               # PyTorch ConvAutoencoder
+│   ├── diffusion.py                 # FlowMatching class (forward + euler_sample)
+│   └── denoiser.py                  # MLPDenoiser, TeacherDenoiser, StudentDenoiser
+├── step0_train_autoencoder.py       # Train 6 ConvAutoencoders from scratch
+├── step0b_eval_ae.py                # Evaluate AE reconstruction quality
+├── step1_extract_latents.py         # Encode 50k CIFAR-10 images → latents
+├── step2_train_teachers.py          # Train 6 flow matching teacher MLPs
+├── step3a_generate.py               # Teacher generates synthetic latent datasets
+├── step3b_distill.py                # Train 24 student MLPs on synthetic data
+├── step4_evaluate.py                # Generate images, compute FID/IS, plot
+└── results/trained_AE/              # Metrics, plots, generated images
 ```
 
 ### Pipeline Steps
 
+**Step 0 — `step0_train_autoencoder.py`**
+- Train a `ConvAutoencoder` from scratch on CIFAR-10 for each of 6 latent dims
+- Loss: LPIPS (VGG backbone, frozen) — perceptual quality
+- 1000 epochs, AdamW lr=2e-3, batch_size=128, cosine LR decay, grad_clip=5.0
+- Save: `checkpoints/ae_{64,128,256,384,512,1024}.pt`
+
+**Step 0b — `step0b_eval_ae.py`**
+- Evaluate AE reconstruction quality (FID, visual samples)
+- Results: `results/ae_eval/`
+
 **Step 1 — `step1_extract_latents.py`**
-- Load 4 pretrained JAX/Flax autoencoders from UvA Tutorial 9 (dims 64/128/256/384)
-- Checkpoints: `https://raw.githubusercontent.com/phlippe/saved_models/main/JAX/tutorial9/cifar10_{dim}.ckpt`
-- Encode all 50k CIFAR-10 training images through each frozen AE encoder
-- Save: `latents/latents_{64,128,256,384}.npy` — shape `(50000, dim)`
+- Load each trained `ConvAutoencoder` from `checkpoints/ae_{dim}.pt`
+- Encode all 50k CIFAR-10 training images (batch_size=512) through the frozen encoder
+- Save: `latents/latents_{64,128,256,384,512,1024}.npy` — shape `(50000, dim)`
 
 **Step 2 — `step2_train_teachers.py`**
-- For each latent dim, normalise latents to zero-mean unit-variance (saves `latents/latents_{dim}_norm_stats.npy`)
-- Train a DDPM teacher MLP denoiser: 4 residual blocks, hidden_dim=512, sinusoidal time embedding, T=1000 steps (cosine schedule)
-- Train 200 epochs, AdamW lr=3e-4, batch_size=256, cosine LR decay, gradient clipping
-- Save: `models/teacher_{64,128,256,384}.pt` (includes latent mean/std for later denormalisation)
+- Normalise latents to zero-mean unit-variance → saves `latents/latents_{dim}_norm_stats.npy`
+- Train a flow matching teacher `TeacherDenoiser` (4 res blocks, hidden_dim=512) on normalised latents
+- 1000 epochs, AdamW lr=3e-4, weight_decay=1e-4, batch_size=256, cosine LR decay, grad_clip=1.0
+- EMA of model weights (decay=0.9999); checkpoint saved every 50 epochs
+- Save: `models/teacher_{dim}.pt` (includes `latent_mean`, `latent_std` for denormalisation)
 
-**Step 3 — `step3_distill_students.py`**
-- Distill each teacher into a smaller student via a **combined loss**:
-  - `L = 0.5 · MSE(ε_student, ε_true)` (DDPM loss — student learns from data directly)
-  - `+ 0.5 · MSE(x̂₀_student, x̂₀_teacher)` (distillation loss — student matches teacher's x₀ predictions)
-- Student architecture: 2 residual blocks, hidden_dim=256 (~4x smaller than teacher)
-- Train 150 epochs, AdamW lr=1e-4, cosine LR decay, gradient clipping
-- At inference, student uses **DDIM with 4 steps** (vs teacher's 1000-step DDPM)
-- Save: `models/student_{64,128,256,384}.pt`
+**Step 3a — `step3a_generate.py`**
+- Load each teacher; run Euler sampling (50 steps, batch=2048) to produce synthetic latent datasets
+- 4 sizes per dim: 250k, 500k, 1M, 2M samples (normalised space, float32 memmap)
+- Also generates a trajectory dataset: 50k × 51 frames × dim (float16 memmap) for analysis
+- Save: `synthetic/{dim}/synthetic_{dim}_{n}.npy`, `synthetic/{dim}/trajectories_{dim}.npy`
+
+**Step 3b — `step3b_distill.py`**
+- Train 24 students (6 dims × 4 sizes) — each `StudentDenoiser` (2 res blocks, hidden_dim=256)
+- Pure flow matching loss: sample x_1, t once per batch → x_t and v_target share the same x_1
+- 100 epochs, AdamW lr=1e-4, cosine LR decay, EMA (decay=0.9999), batch_size=256
+- Save: `models/student_{dim}_{n_samples}.pt`
 
 **Step 4 — `step4_evaluate.py`**
-- Generate 10,000 images per student (4-step sampling → JAX AE decode → pixels)
-- Compute FID (clean-fid), IS (torch-fidelity), optional LPIPS
-- Plot FID vs latent dim → `results/fid_vs_dim.png`
-- Save all metrics → `results/metrics.json`
+- Four independently restartable phases: `--generate`, `--decode`, `--metrics`, `--plot`
+- `--generate`: Euler sampling (50 steps) → 10k latent samples → denormalise → `.npy`
+- `--decode`: PyTorch AE decoder → PNG images; also reconstructs CIFAR-10 test set for AE-FID
+- `--metrics`: FID (clean-fid vs CIFAR-10 train), IS (torch-fidelity), AE-FID
+- `--plot`: produces `fid_vs_size.png` (FID vs dataset size, one line per dim) and `fid_vs_dim.png` (FID vs dim, one line per size), unified `metrics_all.json`
+- Evaluates both teachers (`--teacher`) and students (`--size N`)
 
 ### Key Design Decisions
 
-- Autoencoders are **frozen** throughout — used only for encode/decode
-- JAX/Flax used only in Steps 1 & 4; all training is in **PyTorch**
-- Bridge JAX↔PyTorch via numpy: `np.array(jax_tensor)` → `torch.from_numpy()`
-- Normalize latents to zero-mean unit-variance before diffusion training
-- Checkpoint loading: try msgpack bytes first, then orbax, then legacy `flax.training.checkpoints`
-- Checkpoint downloading: uses `urllib.request.urlretrieve` (stdlib, no extra dependency)
+- Autoencoders are **frozen** after Step 0 — used only for encode (Step 1) and decode (Step 4)
+- Entire pipeline is **PyTorch only** (no JAX/Flax)
+- Generative model is **Flow Matching**, not DDPM
+- Distillation is **dataset distillation**: teacher generates synthetic data, student trains on it (no combined KD loss)
+- Latents are normalised to zero-mean unit-variance before training; denormalised at eval time using saved stats
+- Both teacher and student use **EMA weights** for inference
 
 ### Execution Order
 
 ```bash
 pip install -r requirements.txt
-python step1_extract_latents.py      # ~30 min (CPU JAX encoding)
-python step2_train_teachers.py       # ~2–4 hrs (GPU, sequential)
-python step3_distill_students.py     # ~1–2 hrs (GPU, sequential)
-python step4_evaluate.py             # ~30 min
+python step0_train_autoencoder.py    # ~few hrs per dim (GPU)
+python step0b_eval_ae.py             # optional AE quality check
+python step1_extract_latents.py      # ~minutes (GPU encoding)
+python step2_train_teachers.py       # ~hours per dim (GPU)
+python step3a_generate.py            # ~hours per dim (GPU sampling)
+python step3b_distill.py             # ~hours per dim×size (GPU)
+# then for each dim+size:
+python step4_evaluate.py --generate --dim D --size N
+python step4_evaluate.py --decode   --dim D --size N
+python step4_evaluate.py --metrics  --dim D --size N
+python step4_evaluate.py --plot
 ```
 
-#### Parallel GPU execution (4 GPUs)
+#### Parallel GPU execution
 
-Steps 2, 3, and 4 support a `--dim` argument that pins a single latent dimension
-to `cuda:{index}` (64→0, 128→1, 256→2, 384→3). Run one process per GPU in parallel:
+Steps 0, 2, 3a, 3b, and 4 support `--dim` (and `--size` for 3b/4) to pin a run to a specific GPU:
 
 ```bash
-# Step 2 — train all 4 teachers in parallel
-python step2_train_teachers.py --dim 64  &
-python step2_train_teachers.py --dim 128 &
-python step2_train_teachers.py --dim 256 &
-python step2_train_teachers.py --dim 384 &
+# Step 2 — train all 6 teachers in parallel (round-robin across available GPUs)
+for dim in 64 128 256 384 512 1024; do
+    python step2_train_teachers.py --dim $dim &
+done
 wait
 
-# Step 3 — distil all 4 students in parallel
-python step3_distill_students.py --dim 64  &
-python step3_distill_students.py --dim 128 &
-python step3_distill_students.py --dim 256 &
-python step3_distill_students.py --dim 384 &
+# Step 3a — generate synthetic datasets
+for dim in 64 128 256 384 512 1024; do
+    python step3a_generate.py --dim $dim &
+done
 wait
 
-# Step 4 — evaluate all 4 dims in parallel, then plot (CPU-only)
-python step4_evaluate.py --dim 64  &
-python step4_evaluate.py --dim 128 &
-python step4_evaluate.py --dim 256 &
-python step4_evaluate.py --dim 384 &
+# Step 3b — train all 24 students
+for dim in 64 128 256 384 512 1024; do
+    python step3b_distill.py --dim $dim &
+done
 wait
-python step4_evaluate.py --plot-only
 ```
 
-Each `--dim` run saves `results/metrics_{dim}.json`. `--plot-only` merges them
-into `results/metrics.json` and produces `results/fid_vs_dim.png` (no GPU needed).
+### Model Architectures
 
-If fewer than 4 GPUs are available (or no CUDA), omit `--dim` to fall back to
-the sequential single-device loop.
+| Model | Blocks | Hidden dim | Params (dim=128) |
+|-------|--------|-----------|-----------------|
+| TeacherDenoiser | 4 ResBlocks | 512 | ~large |
+| StudentDenoiser | 2 ResBlocks | 256 | ~4× fewer |
+
+Both use: sinusoidal time embedding (dim=256) → 2-layer MLP → time projection into each ResBlock via `LayerNorm → Linear → GELU + time_proj → Linear + residual`.
 
 ### Pitfalls
 
 | Risk | Mitigation |
 |------|-----------|
-| JAX AE architecture mismatch | Inspect checkpoint keys with `jax.tree_util.tree_map` |
-| Latent scale mismatch | Normalize latents before training |
-| Flax checkpoint format varies | Try msgpack bytes → orbax → legacy flax checkpoints |
+| AE latent scale mismatch | Normalise latents before training; denormalise at eval |
+| x_t / v_target inconsistency | Step 3b sanity-checks that x_1 and t are shared across x_t and v_target |
+| Large synthetic datasets | 2M × 1024 × 4 bytes ≈ 8 GB; use memmap, optionally `--no-load-to-ram` |
+| Stale student checkpoint | 3b skips if `student_{dim}_{size}.pt` exists — delete to retrain |
