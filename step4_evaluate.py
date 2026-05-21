@@ -32,7 +32,7 @@ from tqdm import tqdm
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES = [250_000, 500_000, 1_000_000, 2_000_000]
 N_SAMPLES     = 10_000
-EULER_STEPS   = 50
+EULER_STEPS   = 200
 DECODE_BATCH  = 256
 CKPT_DIR      = Path("checkpoints")
 MODEL_DIR     = Path("models")
