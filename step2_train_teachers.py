@@ -44,12 +44,19 @@ def get_device(dim: int = None) -> str:
 
 def normalise_latents(latents: np.ndarray, dim: int):
     mean = latents.mean(axis=0, keepdims=True)
-    std  = latents.std(axis=0, keepdims=True) + 1e-8
+    std  = latents.std(axis=0, keepdims=True)
     latents_norm = ((latents - mean) / (std + 1e-8)).astype(np.float32)
+
     stats_path = Path(LATENT_DIR) / f"latents_{dim}_norm_stats.npy"
-    np.save(stats_path, np.array([mean, std], dtype=np.float64))
-    print(f"  Norm stats saved → {stats_path}  (mean={mean:.4f}, std={std:.4f})")
-    return latents_norm, mean, std
+    np.save(stats_path, np.stack([mean.squeeze(), std.squeeze()]))
+
+    print(
+        f"  Norm stats saved → {stats_path}  "
+        f"(mean avg={mean.mean():.4f}, std avg={std.mean():.4f}, "
+        f"std min={std.min():.4f}, std max={std.max():.4f})"
+    )
+
+    return latents_norm, mean.squeeze(), std.squeeze()
 
 
 def create_ema(model, device):
