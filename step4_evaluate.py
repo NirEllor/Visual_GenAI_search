@@ -100,8 +100,8 @@ def generate(dim: int, size: Optional[int]) -> None:
         euler_steps = EULER_STEPS
 
     ckpt     = torch.load(str(ckpt_path), map_location="cpu", weights_only=True)
-    lat_mean = float(ckpt["latent_mean"])
-    lat_std  = float(ckpt["latent_std"])
+    lat_mean = ckpt["latent_mean"].cpu().numpy()
+    lat_std = ckpt["latent_std"].cpu().numpy()
     flow     = FlowMatching(device=device)
 
     print(f"  Generating {N_SAMPLES:,} samples with Euler-{euler_steps} …")

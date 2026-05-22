@@ -105,8 +105,8 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         print(f"  [ERROR] {stats_path} not found — run step2 first.")
         return
     stats = np.load(stats_path)
-    lat_mean, lat_std = float(stats[0]), float(stats[1])
-
+    lat_mean = stats[0].astype(np.float32)
+    lat_std = stats[1].astype(np.float32)
     # ── dataset ───────────────────────────────────────────────────────────────
     size_gb = n_samples * dim * 4 / 1e9
     print(f"\n  dim={dim}  n={n_samples:,}  device={device}")
