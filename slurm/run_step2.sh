@@ -1,5 +1,5 @@
 #!/bin/bash
-# Step 2 — Train 6 teacher flow matching models (one per latent dim).
+# Step 2 —- Train 6 teacher flow matching models (one per latent dim).
 # Usage:
 #   bash slurm/run_step2.sh                        # no dependency
 #   bash slurm/run_step2.sh afterok:JID1:JID2:...  # with prior dependency
