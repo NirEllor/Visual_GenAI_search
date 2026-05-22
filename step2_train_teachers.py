@@ -169,8 +169,8 @@ def main():
             {
                 "model_state_dict": ema_model.state_dict(),
                 "latent_dim": dim,
-                "latent_mean": mean.astype(np.float32),
-                "latent_std": std.astype(np.float32),
+                "latent_mean": torch.from_numpy(mean.astype(np.float32)),
+                "latent_std": torch.from_numpy(std.astype(np.float32)),
                 "loss_history": history,
             },
             out_path,
