@@ -207,11 +207,11 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     torch.save(
         {
             "model_state_dict": ema_student.state_dict(),
-            "latent_dim":       dim,
-            "n_samples":        n_samples,
-            "latent_mean":      lat_mean,
-            "latent_std":       lat_std,
-            "loss_history":     history,
+            "latent_dim": dim,
+            "n_samples": n_samples,
+            "latent_mean": torch.from_numpy(lat_mean.astype(np.float32)),
+            "latent_std": torch.from_numpy(lat_std.astype(np.float32)),
+            "loss_history": history,
         },
         out_path,
     )
