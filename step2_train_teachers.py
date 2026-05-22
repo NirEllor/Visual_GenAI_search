@@ -49,7 +49,7 @@ def normalise_latents(latents: np.ndarray, dim: int):
 
     stats_path = Path(LATENT_DIR) / f"latents_{dim}_norm_stats.npy"
     np.save(stats_path, np.stack([mean.squeeze(), std.squeeze()]))
-
+    
     print(
         f"  Norm stats saved → {stats_path}  "
         f"(mean avg={mean.mean():.4f}, std avg={std.mean():.4f}, "
@@ -168,10 +168,10 @@ def main():
         torch.save(
             {
                 "model_state_dict": ema_model.state_dict(),
-                "latent_dim":       dim,
-                "latent_mean":      float(mean),
-                "latent_std":       float(std),
-                "loss_history":     history,
+                "latent_dim": dim,
+                "latent_mean": mean.astype(np.float32),
+                "latent_std": std.astype(np.float32),
+                "loss_history": history,
             },
             out_path,
         )
