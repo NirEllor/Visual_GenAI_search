@@ -43,8 +43,8 @@ def get_device(dim: int = None) -> str:
 
 
 def normalise_latents(latents: np.ndarray, dim: int):
-    mean = latents.mean()
-    std  = latents.std()
+    mean = latents.mean(axis=0, keepdims=True)
+    std  = latents.std(axis=0, keepdims=True) + 1e-8
     latents_norm = ((latents - mean) / (std + 1e-8)).astype(np.float32)
     stats_path = Path(LATENT_DIR) / f"latents_{dim}_norm_stats.npy"
     np.save(stats_path, np.array([mean, std], dtype=np.float64))
