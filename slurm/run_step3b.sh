@@ -17,7 +17,7 @@ IDS=()
 for DIM in "${DIMS[@]}"; do
   for SIZE in "${SIZES[@]}"; do
     JOB=$(sbatch $DEP_FLAG \
-      --mem=30G -c2 --time=4-00 --gres=gpu:1 \
+      --mem=30G -c2 --time=03:00:00 --gres=gpu:1 \
       --mail-type=ALL --mail-user="$EMAIL" \
       --job-name=step3b_stu_d${DIM}_n${SIZE} \
       --wrap "bash -c '$RUN python step3b_distill.py --dim $DIM --size $SIZE --load-to-ram'" \

@@ -15,7 +15,7 @@ DEP_FLAG=""
 IDS=()
 for DIM in "${DIMS[@]}"; do
   JOB=$(sbatch $DEP_FLAG \
-    --mem=40G -c2 --time=2-00 --gres=gpu:1 \
+    --mem=40G -c2 --time=04:00:00 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step3a_gen_d${DIM} \
     --wrap "bash -c '$RUN python step3a_generate.py --dim $DIM'" \
