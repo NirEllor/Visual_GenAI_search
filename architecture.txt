@@ -1,160 +1,169 @@
 ================================================================================
   Architecture & Hyperparameter Reference
-  Knowledge Distillation for Latent Diffusion — CIFAR-10
+  Knowledge Distillation for Latent Flow Matching — CIFAR-10
 ================================================================================
 
 
 ────────────────────────────────────────────────────────────────────────────────
-1. AUTOENCODERS  (JAX / Flax — frozen throughout)
+1. AUTOENCODERS  (PyTorch — frozen after Step 0)
 ────────────────────────────────────────────────────────────────────────────────
 
-Source      : UvA Deep Learning Tutorial 9 (phlippe/uvadlc_notebooks)
-Framework   : JAX + Flax linen
-Input       : CIFAR-10 images  (B, 32, 32, 3),  pixel values in [-1, 1]
-Latent dims : 8, 16, 32, 64, 128, 256, 384
-Base channels (c_hid) : 32  (same across all checkpoints)
+Source      : Custom ConvAutoencoder  (models/autoencoder.py)
+Framework   : PyTorch
+Input       : CIFAR-10 images  (B, 3, 32, 32),  pixel values in [0, 1]
+Latent dims : 64, 128, 256, 384, 512, 1024
 
 Encoder
 -------
-  Conv(c_hid,   3×3, stride=2)  → GELU        # (B, 16, 16, c_hid)
-  Conv(c_hid,   3×3, stride=1)  → GELU        # (B, 16, 16, c_hid)
-  Conv(2·c_hid, 3×3, stride=2)  → GELU        # (B,  8,  8, 2·c_hid)
-  Conv(2·c_hid, 3×3, stride=1)  → GELU        # (B,  8,  8, 2·c_hid)
-  Conv(2·c_hid, 3×3, stride=2)  → GELU        # (B,  4,  4, 2·c_hid)
-  Flatten                                       # (B, 4·4·2·c_hid = 1024)
-  Dense(latent_dim)                             # (B, latent_dim)
+  Conv(3→16,  3×3, stride=2, padding=1) → BatchNorm2d(16)  → ReLU  # (B, 16, 16, 16)
+  Conv(16→32, 3×3, stride=2, padding=1) → BatchNorm2d(32)  → ReLU  # (B, 32,  8,  8)
+  Conv(32→64, 3×3, stride=2, padding=1) → BatchNorm2d(64)  → ReLU  # (B, 64,  4,  4)
+  Flatten                                                             # (B, 1024)
+  Linear(1024 → latent_dim)                                          # (B, latent_dim)
 
 Decoder  (mirrors encoder with transposed convolutions)
 -------
-  Dense(2·16·c_hid)             → GELU        # (B, 1024)
-  Reshape                                       # (B, 4, 4, 2·c_hid)
-  ConvTranspose(2·c_hid, 3×3, stride=2) → GELU # (B, 8,  8,  2·c_hid)
-  Conv(2·c_hid, 3×3)            → GELU        # (B, 8,  8,  2·c_hid)
-  ConvTranspose(c_hid, 3×3, stride=2)   → GELU # (B, 16, 16, c_hid)
-  Conv(c_hid, 3×3)              → GELU        # (B, 16, 16, c_hid)
-  ConvTranspose(3, 3×3, stride=2) → tanh      # (B, 32, 32, 3)
+  Linear(latent_dim → 1024)                                          # (B, 1024)
+  Reshape                                                             # (B, 64, 4, 4)
+  ConvTranspose2d(64→32, 3×3, stride=2, padding=1, out_padding=1) → BatchNorm2d(32) → ReLU  # (B, 32, 8, 8)
+  ConvTranspose2d(32→16, 3×3, stride=2, padding=1, out_padding=1) → BatchNorm2d(16) → ReLU  # (B, 16, 16, 16)
+  ConvTranspose2d(16→3,  3×3, stride=2, padding=1, out_padding=1)                            # (B, 3, 32, 32)
 
-Checkpoint source
-  Pretrained (dims 64, 128, 256, 384):
-    https://raw.githubusercontent.com/phlippe/saved_models/main/JAX/tutorial9/cifar10_{dim}.ckpt
-  Custom-trained (dims 8, 16, 32):
-    checkpoints/cifar10_{dim}_custom.ckpt  — trained by step0_train_autoencoder.py
-
-Step 0 — Custom autoencoder training  (dims 8, 16, 32 only)
-------------------------------------------------------------
-  Framework   : JAX + Flax + Optax
-  Objective   : MSE reconstruction loss  (pixel-space, values in [-1, 1])
-                  L = mean( (decode(encode(x)) − x)² )
-  Optimizer   : Adam  (lr=1e-3)
-  Epochs      : 500
-  Batch size  : 256
-  Checkpoint  : best validation loss params saved (not last epoch)
-  Data split  : CIFAR-10 train (50 000) for training,
-                CIFAR-10 test  (10 000) for validation
-  Log interval: every 50 epochs
-  Output      : checkpoints/cifar10_{8,16,32}_custom.ckpt
-                (serialised via flax.serialization.to_bytes on params["params"])
+Step 0 — Autoencoder training  (all 6 dims)
+-------------------------------------------
+  Objective   : LPIPS (VGG backbone, frozen) — perceptual loss
+  Optimizer   : AdamW  (lr=2e-3)
+  Epochs      : 1000
+  Batch size  : 128
+  LR schedule : CosineAnnealingLR  (T_max=1000, η_min=lr·0.01)
+  Gradient clip: 5.0 (global norm)
+  EMA decay   : 0.9999
+  Output      : checkpoints/ae_{64,128,256,384,512,1024}.pt
+                (keys: model_state_dict, latent_dim, latent_mean, latent_std, loss_history)
 
 
 ────────────────────────────────────────────────────────────────────────────────
-2. DIFFUSION SCHEDULE
+2. GENERATIVE MODEL — FLOW MATCHING (Rectified Flow)
 ────────────────────────────────────────────────────────────────────────────────
 
-Type        : Cosine variance schedule (Nichol & Dhariwal, 2021)
-Timesteps T : 1000
-Offset s    : 0.008
+Source   : models/diffusion.py  (FlowMatching class)
+Type     : Straight-line interpolation / constant-velocity flow
 
-  f(t) = cos( ((t/T + s) / (1 + s)) · π/2 )²
-  ᾱ_t  = f(t) / f(0)
-  β_t  = 1 − ᾱ_t / ᾱ_{t-1},   clipped to [1e-4, 0.9999]
+Forward process (training)
+  x_0 : clean data latent
+  x_1 : Gaussian noise  ~ N(0, I)
+  t   : ~ U[0, 1]
+  x_t = (1 − t) · x_0  +  t · x_1          (interpolation)
+  v   = x_1 − x_0                           (constant target velocity)
+  loss = MSE( v_theta(x_t, t),  v )
 
-Forward process  q(x_t | x_0) = N(√ᾱ_t · x_0,  (1 − ᾱ_t) · I)
-
-Reverse sampling
-  Teacher  : full DDPM  (1000 stochastic steps)
-  Student  : DDIM       (20 deterministic steps, η=0)
-
-Posterior q(x_{t-1} | x_t, x_0) coefficients are precomputed at init.
+Reverse sampling (Euler ODE, n_steps=50)
+  x ← N(0, I)            # t = 1  (pure noise)
+  dt = 1 / n_steps
+  for t = 1.0, 1−dt, ..., dt:
+      x ← x − v_theta(x, t) · dt
+  return x               # t = 0  (data)
 
 
 ────────────────────────────────────────────────────────────────────────────────
-3. DENOISER ARCHITECTURE  (PyTorch)
+3. DENOISER ARCHITECTURE  (PyTorch — velocity network)
 ────────────────────────────────────────────────────────────────────────────────
 
-Both teacher and student are MLP denoisers with the same block structure but
-different depth and width.
+Source   : models/denoiser.py  (MLPDenoiser, TeacherDenoiser, StudentDenoiser)
+
+Both teacher and student predict velocity v_theta(x_t, t) → (B, latent_dim).
 
 Shared components
 -----------------
   SinusoidalPosEmb(time_emb_dim=256)
     → frequencies:  exp(−log(10000) · i / (half−1)),  i ∈ [0, half)
     → output:  [sin(t·freq), cos(t·freq)]  concatenated  → (B, 256)
+    (input t is scaled ×1000 before embedding)
 
   Time-embedding MLP
     SinPosEmb(256) → Linear(256→256) → GELU → Linear(256→256)   → t_emb (B, 256)
 
-  ResBlock(dim, time_emb_dim)
+  ResBlock(dim, time_emb_dim=256)
     x → LayerNorm → Linear(dim→dim) → GELU → + time_proj(t_emb) → Linear(dim→dim) → + x
 
   Output head
-    LayerNorm → Linear(hidden_dim → latent_dim)   # predicts noise ε
+    LayerNorm → Linear(hidden_dim → latent_dim)   # predicts velocity v
 
 Full forward pass
   x_t  → Linear(latent_dim → hidden_dim)
        → N × ResBlock(hidden_dim, time_emb_dim=256)
-       → LayerNorm → Linear(hidden_dim → latent_dim)   →  ε_pred
+       → LayerNorm → Linear(hidden_dim → latent_dim)   →  v_pred
 
 Teacher (step 2)
   hidden_dim : 512
   n_blocks   : 4
-  ~approx params (for latent_dim=64): ~2.7 M
 
-Student (step 3)
+Student (step 3b)
   hidden_dim : 256
   n_blocks   : 2
-  ~approx params (for latent_dim=64): ~0.7 M  (~4× fewer than teacher)
+  (~4× fewer params than teacher)
 
 
 ────────────────────────────────────────────────────────────────────────────────
 4. TRAINING HYPERPARAMETERS
 ────────────────────────────────────────────────────────────────────────────────
 
-Step 2 — Teacher training
-  Epochs          : 1000
-  Batch size      : 256
-  Optimizer       : AdamW  (lr=3e-4, weight_decay=1e-4)
-  LR schedule     : CosineAnnealingLR  (T_max=epochs, η_min=lr·0.01)
-  Gradient clip   : 1.0  (global norm)
-  EMA decay       : 0.9999
-  Loss            : MSE(ε_pred, ε_true)   [noise prediction]
-  Checkpoint freq : every 50 epochs (interim), final at end
+Step 2 — Teacher training  (step2_train_teachers.py)
+  Input       : normalised latents from latents/latents_{dim}.npy
+  Epochs      : 1000
+  Batch size  : 256
+  Optimizer   : AdamW  (lr=3e-4, weight_decay=1e-4)
+  LR schedule : CosineAnnealingLR  (T_max=epochs, η_min=lr·0.01)
+  Gradient clip: 1.0  (global norm)
+  EMA decay   : 0.9999
+  Loss        : MSE( v_pred, v_true )   [velocity prediction]
+  Checkpoint  : every 50 epochs (interim), final at end
+  Output      : models/teacher_{dim}.pt
+                (keys: model_state_dict, latent_dim, latent_mean, latent_std, loss_history)
 
-Step 3 — Student distillation
-  Epochs          : 700
-  Batch size      : 256
-  Optimizer       : AdamW  (lr=1e-4, weight_decay=1e-4)
-  LR schedule     : CosineAnnealingLR  (T_max=epochs, η_min=lr·0.01)
-  Gradient clip   : 1.0  (global norm)
-  EMA decay       : 0.9999
-  Loss            : α · L_DDPM  +  (1−α) · L_distill,   α=0.5
-    L_DDPM    = MSE(ε_student, ε_true)        [student learns from data]
-    L_distill = MSE(ε_student, ε_teacher)     [student matches teacher]
-  Inference steps : 20  (DDIM, η=0)
+Step 3b — Student distillation  (step3b_distill.py)
+  Approach    : dataset distillation — student trains on teacher-generated synthetic data
+  Input       : synthetic/{dim}/synthetic_{dim}_{n}.npy  (normalised latents)
+  Epochs      : 100
+  Batch size  : 256
+  Optimizer   : AdamW  (lr=1e-4, weight_decay=1e-4)
+  LR schedule : CosineAnnealingLR  (T_max=epochs, η_min=lr·0.01)
+  Gradient clip: 1.0  (global norm)
+  EMA decay   : 0.9999
+  Loss        : MSE( v_pred, v_true )   [pure flow matching, no teacher KD loss]
+  Output      : models/student_{dim}_{n_samples}.pt
 
 Latent normalisation
-  Per-dimension: subtract global mean, divide by global std + 1e-8
+  Per-dimension zero-mean unit-variance (computed from CIFAR-10 train latents)
   Stats saved to latents/latents_{dim}_norm_stats.npy
+  Denormalisation applied at decode time using saved mean/std
 
 
 ────────────────────────────────────────────────────────────────────────────────
-5. EVALUATION  (step 4)
+5. SYNTHETIC DATA GENERATION  (step3a_generate.py)
 ────────────────────────────────────────────────────────────────────────────────
 
-  Generated images : 10 000 per latent dimension
-  Sampling         : DDIM 20 steps → AE decode → uint8 [0, 255]
-  Metrics          : FID (clean-fid),  IS (torch-fidelity),  optional LPIPS
-  Output           : results/metrics_{dim}.json
-                     results/metrics.json  (merged)
-                     results/fid_vs_dim.png
+  Source model  : teacher EMA weights
+  Sampling      : Euler ODE, 50 steps, batch=2048
+  Dataset sizes : 250k, 500k, 1M, 2M samples per dim (float32 memmap)
+  Trajectory    : 50k × 51 frames × dim  (float16 memmap)  — for analysis
+  Output        : synthetic/{dim}/synthetic_{dim}_{n}.npy
+                  synthetic/{dim}/trajectories_{dim}.npy
+
+
+────────────────────────────────────────────────────────────────────────────────
+6. EVALUATION  (step4_evaluate.py)
+────────────────────────────────────────────────────────────────────────────────
+
+  Phases (independently restartable via flags):
+    --generate : Euler sampling (50 steps) → 10k latent samples → denormalise → .npy
+    --decode   : AE decoder → PNG images; reconstructs CIFAR-10 test set for AE-FID baseline
+    --metrics  : FID (clean-fid vs CIFAR-10 train), IS (torch-fidelity), AE-FID
+    --plot     : fid_vs_size.png, fid_vs_dim.png, unified metrics_all.json
+
+  Generated images : 10 000 per (dim, size) combination
+  Sampling         : Euler 50 steps → denormalise → AE decode → PNG
+  Metrics          : FID (clean-fid),  IS (torch-fidelity),  AE-FID
+  Output           : results/trained_AE/
 
 ================================================================================
