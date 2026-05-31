@@ -47,8 +47,10 @@ All generative models use **Flow Matching** (Rectified Flow), not DDPM. Implemen
 ### Autoencoder
 
 Custom PyTorch `ConvAutoencoder` (`models/autoencoder.py`):
-- 3-layer strided conv encoder: `(3,32,32)` → `(64,4,4)` → FC → `latent_dim`
-- 3-layer transposed conv decoder (mirror of encoder)
+- 3-layer strided conv encoder: `(3,32,32)` → `(64,4,4)` → 1×1 conv → `(C,4,4)` → flatten → `latent_dim`
+- `latent_channels = latent_dim // 16`; **`latent_dim` must be divisible by 16**
+- 3-layer transposed conv decoder (mirror of encoder): unflatten → `(C,4,4)` → 1×1 conv → `(64,4,4)` → upsample
+- No fully-connected bottleneck — spatial structure is preserved through 1×1 projection convolutions
 - Trained from scratch in Step 0 using LPIPS (VGG) loss
 
 ### File Structure
@@ -185,3 +187,4 @@ Both use: sinusoidal time embedding (dim=256) → 2-layer MLP → time projectio
 | x_t / v_target inconsistency | Step 3b sanity-checks that x_1 and t are shared across x_t and v_target |
 | Large synthetic datasets | 2M × 1024 × 4 bytes ≈ 8 GB; use memmap, optionally `--no-load-to-ram` |
 | Stale student checkpoint | 3b skips if `student_{dim}_{size}.pt` exists — delete to retrain |
+| Invalid latent_dim for AE | `ConvAutoencoder` requires `latent_dim % 16 == 0`; all 6 dims (64,128,256,384,512,1024) satisfy this |
