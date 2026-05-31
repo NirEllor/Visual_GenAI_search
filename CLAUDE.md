@@ -49,8 +49,10 @@ All generative models use **Flow Matching** (Rectified Flow), not DDPM. Implemen
 Custom PyTorch `ConvAutoencoder` (`models/autoencoder.py`):
 - 3-layer strided conv encoder: `(3,32,32)` → `(64,4,4)` → 1×1 conv → `(C,4,4)` → flatten → `latent_dim`
 - `latent_channels = latent_dim // 16`; **`latent_dim` must be divisible by 16**
-- 3-layer transposed conv decoder (mirror of encoder): unflatten → `(C,4,4)` → 1×1 conv → `(64,4,4)` → upsample
-- No fully-connected bottleneck — spatial structure is preserved through 1×1 projection convolutions
+- 3-layer transposed conv decoder (mirror): unflatten → `(C,4,4)` → 1×1 conv → `(64,4,4)` → upsample
+- **No FC bottleneck** — the information bottleneck is controlled entirely by channel width `C` at the 1×1 projection
+- The `encoder_conv` (3→16→32→64) is a fixed feature extractor; `encoder_proj` (64→C) is the experimental variable
+- This is by design: varying `latent_dim` varies `C`, which varies bottleneck capacity — not layer width
 - Trained from scratch in Step 0 using LPIPS (VGG) loss
 
 ### File Structure
