@@ -38,11 +38,13 @@ echo ""
 echo "=== Step 0b: Eval AutoEncoders ==="
 OUT0B=$(bash "$SCRIPT_DIR/run_step0b.sh" "$DEP0")
 echo "$OUT0B"
+IDS0B=$(ids_from "step0b" "$OUT0B")
 
-# ── Step 1: Extract Latents (depends on step0) ─────────────────────────────────
+# ── Step 1: Extract Latents (depends on step0 + step0b) ────────────────────────
 echo ""
 echo "=== Step 1: Extract Latents ==="
-OUT1=$(bash "$SCRIPT_DIR/run_step1.sh" "$DEP0")
+DEP0_AND_0B="afterok:$(echo "$IDS0 $IDS0B" | tr ' ' ':')"
+OUT1=$(bash "$SCRIPT_DIR/run_step1.sh" "$DEP0_AND_0B")
 echo "$OUT1"
 IDS1=$(ids_from "step1" "$OUT1")
 DEP1=$(ids_to_dep "$IDS1")
