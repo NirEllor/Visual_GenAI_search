@@ -55,8 +55,8 @@ def extract_latents(dim: int, device: torch.device) -> None:
     with torch.no_grad():
         for imgs, _ in tqdm(loader, desc=f"  Encoding (dim={dim})"):
             imgs = imgs.to(device)
-            z    = model.encode(imgs)
-            all_latents.append(z.cpu().numpy())
+            _, mean, _ = model.encode(imgs, sample=False)
+            all_latents.append(mean.cpu().numpy())
 
     latents = np.concatenate(all_latents, axis=0).astype(np.float32)
     print(f"  Latents shape : {latents.shape}")

@@ -1,10 +1,12 @@
 """
-MLP-based velocity networks for latent flow matching (PyTorch).
+Velocity networks for latent flow matching (PyTorch).
 
-TeacherDenoiser : 4 residual blocks, hidden_dim=512  (~large)
-StudentDenoiser : 2 residual blocks, hidden_dim=256  (~4x fewer params)
+TeacherDenoiser : 4 conv residual blocks, hidden_channels=256
+StudentDenoiser : 2 conv residual blocks, hidden_channels=128
 
-Both share the same interface:
+Both process latents as (C, 4, 4) spatial maps with FiLM time conditioning,
+then flatten back to (B, latent_dim).  Interface is identical to the old MLP:
+
     out = model(x_t, t)
 where
     x_t : (B, latent_dim)  interpolated latent at time t
@@ -28,7 +30,6 @@ class SinusoidalPosEmb(nn.Module):
         self.dim = dim
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
-        # t : (B,) integer or float
         device = t.device
         half = self.dim // 2
         freqs = torch.exp(
@@ -39,56 +40,62 @@ class SinusoidalPosEmb(nn.Module):
         return emb
 
 
-# ── Residual block ────────────────────────────────────────────────────────────
+# ── Convolutional residual block with FiLM time conditioning ─────────────────
 
-class ResBlock(nn.Module):
+class ConvResBlock(nn.Module):
     """
-    One residual MLP block.
+    Conv residual block operating on (B, channels, H, W) spatial feature maps.
 
-    x  →  LayerNorm  →  Linear(dim)  →  GELU  →  + time_proj(t_emb)  →  Linear(dim)  →  + x
+    FiLM conditioning: scale and shift from time embedding, applied after the first conv.
     """
 
-    def __init__(self, dim: int, time_emb_dim: int):
+    def __init__(self, channels: int, time_emb_dim: int):
         super().__init__()
-        self.norm = nn.LayerNorm(dim)
-        self.lin1 = nn.Linear(dim, dim)
-        self.lin2 = nn.Linear(dim, dim)
-        self.time_proj = nn.Linear(time_emb_dim, dim)
+        groups = min(32, channels)
+        self.norm1     = nn.GroupNorm(groups, channels)
+        self.conv1     = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.norm2     = nn.GroupNorm(groups, channels)
+        self.conv2     = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.time_proj = nn.Linear(time_emb_dim, 2 * channels)  # → scale + shift
 
     def forward(self, x: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
-        h = self.norm(x)
-        h = F.gelu(self.lin1(h))
-        h = h + self.time_proj(t_emb)
-        h = self.lin2(h)
+        scale, shift = self.time_proj(t_emb).chunk(2, dim=-1)   # each (B, channels)
+        scale = scale.unsqueeze(-1).unsqueeze(-1)                # (B, channels, 1, 1)
+        shift = shift.unsqueeze(-1).unsqueeze(-1)
+
+        h = F.gelu(self.conv1(self.norm1(x))) * (1 + scale) + shift
+        h = self.conv2(self.norm2(h))
         return x + h
 
 
-# ── Base MLP denoiser ─────────────────────────────────────────────────────────
+# ── Convolutional denoiser ────────────────────────────────────────────────────
 
-class MLPDenoiser(nn.Module):
+class ConvDenoiser(nn.Module):
     """
-    Generic MLP denoiser.  Subclasses set hidden_dim and n_blocks.
+    Velocity network that processes latents as (C, 4, 4) spatial maps.
 
     Architecture
     ------------
-    time → SinPosEmb(time_emb_dim) → MLP → t_emb
-    x_t  → Linear(hidden_dim)      → n × ResBlock(hidden_dim, t_emb)
-           → LayerNorm → Linear(latent_dim)   [ε prediction]
+    time → SinPosEmb → MLP → t_emb
+    x_t (B, latent_dim)
+      → reshape (B, C, 4, 4)
+      → Conv2d 1×1 input projection → (B, hidden_channels, 4, 4)
+      → n × ConvResBlock(hidden_channels, t_emb)
+      → GroupNorm → Conv2d 1×1 output projection → (B, C, 4, 4)
+      → flatten → (B, latent_dim)
     """
 
     def __init__(
         self,
         latent_dim: int,
-        hidden_dim: int,
+        hidden_channels: int,
         n_blocks: int,
         time_emb_dim: int = 256,
     ):
         super().__init__()
-        self.latent_dim = latent_dim
-        self.hidden_dim = hidden_dim
-        self.n_blocks = n_blocks
+        self.latent_dim      = latent_dim
+        self.latent_channels = latent_dim // 16  # C, since 4*4=16
 
-        # Time embedding MLP
         self.time_embed = nn.Sequential(
             SinusoidalPosEmb(time_emb_dim),
             nn.Linear(time_emb_dim, time_emb_dim),
@@ -96,18 +103,16 @@ class MLPDenoiser(nn.Module):
             nn.Linear(time_emb_dim, time_emb_dim),
         )
 
-        # Input projection
-        self.input_proj = nn.Linear(latent_dim, hidden_dim)
+        self.input_proj = nn.Conv2d(self.latent_channels, hidden_channels, kernel_size=1)
 
-        # Residual blocks
         self.blocks = nn.ModuleList(
-            [ResBlock(hidden_dim, time_emb_dim) for _ in range(n_blocks)]
+            [ConvResBlock(hidden_channels, time_emb_dim) for _ in range(n_blocks)]
         )
 
-        # Output head
+        groups = min(32, hidden_channels)
         self.output_head = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, latent_dim),
+            nn.GroupNorm(groups, hidden_channels),
+            nn.Conv2d(hidden_channels, self.latent_channels, kernel_size=1),
         )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -121,33 +126,34 @@ class MLPDenoiser(nn.Module):
         -------
         v : (B, latent_dim)  predicted velocity
         """
-        t_emb = self.time_embed(t * 1000)      # scale to match embedding frequency range
-        h = self.input_proj(x)                 # (B, hidden_dim)
+        t_emb = self.time_embed(t * 1000)                          # (B, time_emb_dim)
+        h = x.view(-1, self.latent_channels, 4, 4)                 # (B, C, 4, 4)
+        h = self.input_proj(h)                                     # (B, hidden_channels, 4, 4)
         for block in self.blocks:
             h = block(h, t_emb)
-        return self.output_head(h)             # (B, latent_dim)
+        return self.output_head(h).flatten(1)                      # (B, latent_dim)
 
 
 # ── Concrete models ───────────────────────────────────────────────────────────
 
-class TeacherDenoiser(MLPDenoiser):
-    """Large teacher: 4 residual blocks, hidden_dim=512."""
+class TeacherDenoiser(ConvDenoiser):
+    """Large teacher: 4 conv residual blocks, hidden_channels=256."""
 
-    def __init__(self, latent_dim: int, hidden_dim: int = 1024, n_blocks: int = 8):
+    def __init__(self, latent_dim: int, hidden_channels: int = 256, n_blocks: int = 4):
         super().__init__(
             latent_dim=latent_dim,
-            hidden_dim=hidden_dim,
+            hidden_channels=hidden_channels,
             n_blocks=n_blocks,
         )
 
 
-class StudentDenoiser(MLPDenoiser):
-    """Small student: 2 residual blocks, hidden_dim=256 (~4× fewer params)."""
+class StudentDenoiser(ConvDenoiser):
+    """Small student: 2 conv residual blocks, hidden_channels=128 (~4× fewer params)."""
 
-    def __init__(self, latent_dim: int, hidden_dim: int = 256, n_blocks: int = 2):
+    def __init__(self, latent_dim: int, hidden_channels: int = 128, n_blocks: int = 2):
         super().__init__(
             latent_dim=latent_dim,
-            hidden_dim=hidden_dim,
+            hidden_channels=hidden_channels,
             n_blocks=n_blocks,
         )
 

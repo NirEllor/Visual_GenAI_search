@@ -27,16 +27,11 @@ class ConvAutoencoder(nn.Module):
             nn.ReLU(True),
         )
 
-        # Replaces Flatten + Linear(1024 -> latent_dim)
-        # Keeps spatial structure: (B, 64, 4, 4) -> (B, C, 4, 4)
-        self.encoder_proj = nn.Conv2d(
-            in_channels=64,
-            out_channels=self.latent_channels,
-            kernel_size=1
-        )
+        # VAE: separate mean and logvar heads — (B, 64, 4, 4) → (B, C, 4, 4)
+        self.encoder_mean   = nn.Conv2d(64, self.latent_channels, kernel_size=1)
+        self.encoder_logvar = nn.Conv2d(64, self.latent_channels, kernel_size=1)
 
-        # Replaces Linear(latent_dim -> 1024)
-        # Restores channels: (B, C, 4, 4) -> (B, 64, 4, 4)
+        # Decoder projection: (B, C, 4, 4) → (B, 64, 4, 4)
         self.decoder_proj = nn.Conv2d(
             in_channels=self.latent_channels,
             out_channels=64,
@@ -55,15 +50,27 @@ class ConvAutoencoder(nn.Module):
             nn.ConvTranspose2d(16, 3, kernel_size=3, stride=2, padding=1, output_padding=1),   # (B, 3, 32, 32)
         )
 
-    def encode(self, x):
-        x = self.encoder_conv(x)          # (B, 64, 4, 4)
-        x = self.encoder_proj(x)          # (B, C, 4, 4)
-        return torch.flatten(x, start_dim=1)  # (B, latent_dim)
+    def encode(self, x: torch.Tensor, sample: bool = True):
+        """
+        Returns (z_flat, mean_flat, logvar_flat).
+        sample=True  → reparameterized draw, used during training
+        sample=False → mean only, deterministic, used for latent extraction
+        """
+        h      = self.encoder_conv(x)                          # (B, 64, 4, 4)
+        mean   = self.encoder_mean(h)                          # (B, C, 4, 4)
+        logvar = self.encoder_logvar(h).clamp(-30, 20)        # (B, C, 4, 4)
+        if sample:
+            z = mean + torch.randn_like(mean) * torch.exp(0.5 * logvar)
+        else:
+            z = mean
+        return torch.flatten(z, 1), torch.flatten(mean, 1), torch.flatten(logvar, 1)
 
-    def decode(self, latent):
+    def decode(self, latent: torch.Tensor) -> torch.Tensor:
         x = latent.view(-1, self.latent_channels, 4, 4)  # (B, C, 4, 4)
         x = self.decoder_proj(x)                         # (B, 64, 4, 4)
         return self.decoder_conv(x)
 
-    def forward(self, x):
-        return self.decode(self.encode(x))
+    def forward(self, x: torch.Tensor):
+        """Returns (recon_logits, mean_flat, logvar_flat) for training."""
+        z, mean, logvar = self.encode(x, sample=True)
+        return self.decode(z), mean, logvar

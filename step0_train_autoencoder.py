@@ -29,6 +29,7 @@ WEIGHT_DECAY = 0
 GRAD_CLIP    = 5.0
 LPIPS_WEIGHT = 1.0
 L1_WEIGHT    = 0.0
+KL_WEIGHT    = 0.001  # β-KL: forces latent space toward N(0,I) for flow matching
 CKPT_DIR     = Path("checkpoints")
 
 
@@ -72,7 +73,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
         for imgs, _ in tqdm(loader, desc=f"  Epoch {epoch}/{EPOCHS}", leave=False):
             imgs = imgs.to(device)
 
-            recon_logits = model(imgs)
+            recon_logits, mean, logvar = model(imgs)
             recon_for_loss = torch.sigmoid(recon_logits)
 
             recon_lpips = F.interpolate(
@@ -96,7 +97,9 @@ def train_one_dim(dim: int, device: torch.device) -> None:
 
             l1_loss = l1_fn(recon_for_loss, imgs)
 
-            loss = LPIPS_WEIGHT * lpips_loss + L1_WEIGHT * l1_loss
+            kl_loss = -0.5 * (1 + logvar - mean.pow(2) - logvar.exp()).mean()
+
+            loss = LPIPS_WEIGHT * lpips_loss + L1_WEIGHT * l1_loss + KL_WEIGHT * kl_loss
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
