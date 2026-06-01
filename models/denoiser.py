@@ -133,7 +133,7 @@ class MLPDenoiser(nn.Module):
 class TeacherDenoiser(MLPDenoiser):
     """Large teacher: 4 residual blocks, hidden_dim=512."""
 
-    def __init__(self, latent_dim: int, hidden_dim: int = 512, n_blocks: int = 4):
+    def __init__(self, latent_dim: int, hidden_dim: int = 1024, n_blocks: int = 8):
         super().__init__(
             latent_dim=latent_dim,
             hidden_dim=hidden_dim,
