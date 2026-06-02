@@ -29,7 +29,7 @@ from models.diffusion import FlowMatching
 from models.denoiser import load_teacher
 
 LATENT_DIMS     = [64, 128, 256, 384, 512, 1024]
-DATASET_SIZES   = [250_000, 500_000, 1_000_000, 2_000_000]
+DATASET_SIZES   = [50_000, 100_000, 150_000, 200_000]
 TRAJ_SAMPLES    = 50_000    # trajectory dataset size (storage-bounded)
 EULER_STEPS     = 50
 GEN_BATCH       = 2_048
