@@ -39,8 +39,8 @@ MODEL_DIR     = Path("models")
 RESULTS_DIR   = Path("results/trained_AE")
 AE_EVAL_DIR   = Path("results/ae_eval")
 
-SIZE_LABELS = {250_000: "250k", 500_000: "500k",
-               1_000_000: "1M",  2_000_000: "2M"}
+SIZE_LABELS = {50_000: "50k", 100_000: "100k",
+               150_000: "150k",  200_000: "200k"}
 DIM_COLORS  = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
 SIZE_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
