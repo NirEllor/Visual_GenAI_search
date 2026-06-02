@@ -30,7 +30,7 @@ from tqdm import tqdm
 
 # ── configuration ─────────────────────────────────────────────────────────────
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
-DATASET_SIZES = [250_000, 500_000, 1_000_000, 2_000_000]
+DATASET_SIZES = [50_000, 100_000, 150_000, 200_000]
 N_SAMPLES     = 10_000
 EULER_STEPS   = 200
 DECODE_BATCH  = 256

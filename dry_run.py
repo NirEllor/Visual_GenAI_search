@@ -15,9 +15,9 @@ Usage:
 from pathlib import Path
 
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
-DATASET_SIZES = [250_000, 500_000, 1_000_000, 2_000_000]
-SIZE_LABELS   = {250_000: "250k", 500_000: "500k",
-                 1_000_000: "1M", 2_000_000: "2M"}
+DATASET_SIZES = [50_000, 100_000, 150_000, 200_000]
+SIZE_LABELS   = {50_000: "50k", 100_000: "100k",
+                 150_000: "150k", 200_000: "200k"}
 
 CKPT_DIR      = Path("checkpoints")
 MODEL_DIR     = Path("models")
