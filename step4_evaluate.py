@@ -154,12 +154,26 @@ def decode(dim: int, size: Optional[int]) -> None:
     with torch.no_grad():
         for start in tqdm(range(0, len(z_orig), DECODE_BATCH),
                           desc="  Decoding", leave=False):
-            z_b   = z_orig[start:start + DECODE_BATCH].to(device)
-            recon_logits, _, _ = ae(imgs.to(device))
-            recon = (torch.sigmoid(recon_logits).clamp(0, 1) * 255).byte().cpu().numpy()
+
+            z_b = z_orig[start:start + DECODE_BATCH].to(device)
+
+            recon_logits = ae.decode(z_b)
+
+            recon = (
+                torch.sigmoid(recon_logits)
+                .clamp(0, 1)
+                .mul(255)
+                .byte()
+                .cpu()
+                .numpy()
+            )
+
             recon = recon.transpose(0, 2, 3, 1)
+
             for img_arr in recon:
-                Image.fromarray(img_arr).save(gdir / f"{img_idx:05d}.png")
+                Image.fromarray(img_arr).save(
+                    gdir / f"{img_idx:05d}.png"
+                )
                 img_idx += 1
     print(f"  Images → {gdir}/  ({img_idx} files)")
 
