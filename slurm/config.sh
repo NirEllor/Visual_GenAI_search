@@ -9,5 +9,5 @@ TORCH_CACHE="/cs/labs/raananf/ellorw.nir/torch_cache"
 
 RUN="source /cs/labs/raananf/ellorw.nir/venv/bin/activate && cd $PROJECT &&"
 
-DIMS=(1024)
+DIMS=(64 128 256 384 512 1024)
 SIZES=(50000 100000 150000 200000)
