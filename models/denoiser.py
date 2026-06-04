@@ -152,12 +152,13 @@ class TeacherDenoiser(ConvDenoiser):
 
 
 class StudentDenoiser(ConvDenoiser):
-    """Small student: 2 conv residual blocks, hidden_channels scales with latent channels."""
+    """Student: conv residual blocks, hidden_channels scales with latent channels."""
 
     def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 2):
         latent_channels = latent_dim // 16
+
         if hidden_channels is None:
-            hidden_channels = max(128, latent_channels * 4)
+            hidden_channels = max(128, latent_channels * 8)
 
         super().__init__(
             latent_dim=latent_dim,
