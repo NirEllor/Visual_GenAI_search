@@ -36,7 +36,7 @@ from models.denoiser import StudentDenoiser, param_count
 
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES = [50_000, 100_000, 150_000, 200_000]
-EPOCHS        = 100
+EPOCHS        = 1000
 BATCH_SIZE    = 256
 LR            = 1e-4
 WEIGHT_DECAY  = 1e-4
