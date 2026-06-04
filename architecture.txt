@@ -10,21 +10,29 @@
 
 Source      : Custom ConvAutoencoder  (models/autoencoder.py)
 Framework   : PyTorch
+Type        : Variational Autoencoder (VAE) with reparameterization
 Input       : CIFAR-10 images  (B, 3, 32, 32),  pixel values in [0, 1]
 Latent dims : 64, 128, 256, 384, 512, 1024
+              latent_channels = latent_dim // 16  (since spatial map is 4×4)
 
 Encoder
 -------
   Conv(3→16,  3×3, stride=2, padding=1) → BatchNorm2d(16)  → ReLU  # (B, 16, 16, 16)
   Conv(16→32, 3×3, stride=2, padding=1) → BatchNorm2d(32)  → ReLU  # (B, 32,  8,  8)
   Conv(32→64, 3×3, stride=2, padding=1) → BatchNorm2d(64)  → ReLU  # (B, 64,  4,  4)
-  Flatten                                                             # (B, 1024)
-  Linear(1024 → latent_dim)                                          # (B, latent_dim)
+  ┌─ encoder_mean   : Conv2d(64→C, 1×1)   → (B, C, 4, 4)
+  └─ encoder_logvar : Conv2d(64→C, 1×1)   → (B, C, 4, 4)  (clamped to [−30, 20])
+  Reparameterization: z = mean + ε · exp(0.5 · logvar),  ε ~ N(0, I)
+  Flatten:  z, mean, logvar  →  (B, latent_dim)   [= (B, C·16)]
 
-Decoder  (mirrors encoder with transposed convolutions)
+  Note: encoder_conv (3→16→32→64) is a fixed feature extractor;
+        encoder_mean / encoder_logvar are the experimental variable (bottleneck width C).
+        No FC linear layer — bottleneck capacity is controlled entirely by channel width C.
+
+Decoder  (mirrors encoder)
 -------
-  Linear(latent_dim → 1024)                                          # (B, 1024)
-  Reshape                                                             # (B, 64, 4, 4)
+  Reshape z   (B, latent_dim) → (B, C, 4, 4)
+  decoder_proj : Conv2d(C→64, 1×1)                                    # (B, 64, 4, 4)
   ConvTranspose2d(64→32, 3×3, stride=2, padding=1, out_padding=1) → BatchNorm2d(32) → ReLU  # (B, 32, 8, 8)
   ConvTranspose2d(32→16, 3×3, stride=2, padding=1, out_padding=1) → BatchNorm2d(16) → ReLU  # (B, 16, 16, 16)
   ConvTranspose2d(16→3,  3×3, stride=2, padding=1, out_padding=1)                            # (B, 3, 32, 32)
@@ -69,9 +77,10 @@ Reverse sampling (Euler ODE, n_steps=50)
 3. DENOISER ARCHITECTURE  (PyTorch — velocity network)
 ────────────────────────────────────────────────────────────────────────────────
 
-Source   : models/denoiser.py  (MLPDenoiser, TeacherDenoiser, StudentDenoiser)
+Source   : models/denoiser.py  (ConvDenoiser, TeacherDenoiser, StudentDenoiser)
 
 Both teacher and student predict velocity v_theta(x_t, t) → (B, latent_dim).
+Latents are processed as (C, 4, 4) spatial feature maps, not as flat vectors.
 
 Shared components
 -----------------
@@ -83,25 +92,47 @@ Shared components
   Time-embedding MLP
     SinPosEmb(256) → Linear(256→256) → GELU → Linear(256→256)   → t_emb (B, 256)
 
-  ResBlock(dim, time_emb_dim=256)
-    x → LayerNorm → Linear(dim→dim) → GELU → + time_proj(t_emb) → Linear(dim→dim) → + x
+  ConvResBlock(channels, time_emb_dim=256)   — FiLM conditioning
+    GroupNorm(min(32, channels), channels)
+    Conv2d(channels→channels, 3×3, padding=1)
+    GroupNorm(min(32, channels), channels)
+    Conv2d(channels→channels, 3×3, padding=1)
+    time_proj: Linear(256 → 2·channels)  →  scale (B, channels, 1, 1) + shift (B, channels, 1, 1)
+    forward: h = GELU(conv1(norm1(x))) · (1 + scale) + shift
+             h = conv2(norm2(h))
+             return x + h
 
   Output head
-    LayerNorm → Linear(hidden_dim → latent_dim)   # predicts velocity v
+    GroupNorm(min(32, hidden_channels), hidden_channels)
+    Conv2d(hidden_channels→C, 1×1)   # predicts velocity spatial map
 
 Full forward pass
-  x_t  → Linear(latent_dim → hidden_dim)
-       → N × ResBlock(hidden_dim, time_emb_dim=256)
-       → LayerNorm → Linear(hidden_dim → latent_dim)   →  v_pred
+  x_t  (B, latent_dim)
+       → reshape  (B, C, 4, 4)
+       → input_proj: Conv2d(C → hidden_channels, 1×1)   → (B, hidden_channels, 4, 4)
+       → N × ConvResBlock(hidden_channels, t_emb=256)
+       → output_head: GroupNorm → Conv2d(hidden_channels → C, 1×1)  → (B, C, 4, 4)
+       → flatten  →  v_pred (B, latent_dim)
 
 Teacher (step 2)
-  hidden_dim : 512
-  n_blocks   : 4
+  n_blocks       : 4
+  hidden_channels: max(256, latent_channels × 8)   [scales with latent_dim]
+  e.g. dim=64  → C=4,   hidden=256
+       dim=128 → C=8,   hidden=256
+       dim=256 → C=16,  hidden=256 (tie)
+       dim=384 → C=24,  hidden=256
+       dim=512 → C=32,  hidden=256
+       dim=1024→ C=64,  hidden=512
 
 Student (step 3b)
-  hidden_dim : 256
-  n_blocks   : 2
-  (~4× fewer params than teacher)
+  n_blocks       : 2
+  hidden_channels: max(128, latent_channels × 8)   [scales with latent_dim]
+  e.g. dim=64  → C=4,   hidden=128
+       dim=128 → C=8,   hidden=128
+       dim=256 → C=16,  hidden=128
+       dim=384 → C=24,  hidden=192
+       dim=512 → C=32,  hidden=256
+       dim=1024→ C=64,  hidden=512
 
 
 ────────────────────────────────────────────────────────────────────────────────
