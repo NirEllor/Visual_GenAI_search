@@ -1,246 +1,190 @@
-"""
-visualize_latents.py — Project latent spaces to 2D and compare with pixel space.
-
-Loads latents/latents_{dim}.npy for each available latent dimension, along with
-raw CIFAR-10 pixel data, reduces everything to 2D, and saves a single figure
-with one panel per space, each point coloured by CIFAR-10 class label.
-
-Usage
------
-  python visualize_latents.py                        # PCA, 5000 samples, all dims
-  python visualize_latents.py --method tsne          # t-SNE (slower, better clusters)
-  python visualize_latents.py --method umap          # UMAP  (pip install umap-learn)
-  python visualize_latents.py --dims 64 128 256 384  # specific dims only
-  python visualize_latents.py --n-samples 2000       # fewer points (faster t-SNE)
-
-Output
-------
-  results/latent_space_2d_{method}.png
-"""
-
-import argparse
-import os
-import pickle
+import json
 from pathlib import Path
 
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
-import torchvision
-
-# ── constants ─────────────────────────────────────────────────────────────────
 
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
-LATENT_DIR  = "latents"
-DATA_DIR    = "data"
-RESULTS_DIR = "results"
 
-CIFAR10_CLASSES = [
-    "airplane", "automobile", "bird", "cat", "deer",
-    "dog", "frog", "horse", "ship", "truck",
-]
-
-# Visually distinct palette (one colour per class)
-PALETTE = [
-    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
-    "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#808080",
-]
+LATENT_DIR = Path("latents")
+RESULTS_DIR = Path("results/trained_AE")
+OUT_DIR = Path("results/teacher_latent_analysis")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ── data loading ──────────────────────────────────────────────────────────────
-
-def load_cifar10_labels(data_dir: str) -> np.ndarray:
-    """Return the 50 000 training labels as an int32 array."""
-    torchvision.datasets.CIFAR10(root=data_dir, train=True, download=True, transform=None)
-    cifar_dir = os.path.join(data_dir, "cifar-10-batches-py")
-    labels = []
-    for i in range(1, 6):
-        path = os.path.join(cifar_dir, f"data_batch_{i}")
-        with open(path, "rb") as f:
-            d = pickle.load(f, encoding="latin1")
-        labels.extend(d["labels"])
-    return np.array(labels, dtype=np.int32)
+def load_real_latents(dim: int) -> np.ndarray:
+    return np.load(LATENT_DIR / f"latents_{dim}.npy").astype(np.float32)
 
 
-def load_pixel_space(data_dir: str) -> np.ndarray:
-    """Return CIFAR-10 training images flattened to (50000, 3072) float32 in [-1, 1]."""
-    cifar_dir = os.path.join(data_dir, "cifar-10-batches-py")
-    batches = []
-    for i in range(1, 6):
-        path = os.path.join(cifar_dir, f"data_batch_{i}")
-        with open(path, "rb") as f:
-            d = pickle.load(f, encoding="latin1")
-        batches.append(d["data"])  # (10000, 3072) uint8
-    pixels = np.concatenate(batches, axis=0).astype(np.float32) / 127.5 - 1.0
-    return pixels  # (50000, 3072)
-
-
-# ── dimensionality reduction ──────────────────────────────────────────────────
-
-def reduce_2d(X: np.ndarray, method: str) -> np.ndarray:
-    """StandardScale X, then project to 2D.  Returns (N, 2) float array."""
-    X_scaled = StandardScaler().fit_transform(X)
-
-    if method == "pca":
-        from sklearn.decomposition import PCA
-        return PCA(n_components=2, random_state=42).fit_transform(X_scaled)
-
-    elif method == "tsne":
-        from sklearn.manifold import TSNE
-        return TSNE(
-            n_components=2, perplexity=40, max_iter=1000,
-            random_state=42, n_jobs=-1,
-        ).fit_transform(X_scaled)
-
-    elif method == "umap":
-        try:
-            import umap as umap_lib
-        except ImportError:
-            raise ImportError(
-                "umap-learn is not installed.\n"
-                "Install it with:  pip install umap-learn"
-            )
-        return umap_lib.UMAP(n_components=2, random_state=42).fit_transform(X_scaled)
-
-    raise ValueError(f"Unknown method: {method!r}")
-
-
-# ── plotting helpers ──────────────────────────────────────────────────────────
-
-def draw_panel(ax: plt.Axes, xy: np.ndarray, labels: np.ndarray, title: str) -> None:
-    for cls_idx, cls_name in enumerate(CIFAR10_CLASSES):
-        mask = labels == cls_idx
-        ax.scatter(
-            xy[mask, 0], xy[mask, 1],
-            s=3, alpha=0.45, linewidths=0,
-            color=PALETTE[cls_idx], label=cls_name, rasterized=True,
+def load_teacher_latents(dim: int) -> np.ndarray:
+    path = RESULTS_DIR / f"z_orig_{dim}_teacher.npy"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found. Run Step 4 --generate --teacher for dim={dim} first."
         )
-    ax.set_title(title, fontsize=9, fontweight="bold", pad=4)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_aspect("equal", adjustable="datalim")
+    return np.load(path).astype(np.float32)
 
 
-# ── core logic (importable) ───────────────────────────────────────────────────
+def sample_same_size(real: np.ndarray, gen: np.ndarray, seed: int = 0):
+    n = min(len(real), len(gen))
+    rng = np.random.default_rng(seed)
+    real_idx = rng.choice(len(real), size=n, replace=False)
+    gen_idx = rng.choice(len(gen), size=n, replace=False)
+    return real[real_idx], gen[gen_idx]
 
-def run(method: str = "pca", n_samples: int = 5000, dims: list = None) -> None:
-    """
-    Generate and save the latent-space 2D visualisation.
 
-    Parameters
-    ----------
-    method    : 'pca' | 'tsne' | 'umap'
-    n_samples : number of points to sample per space
-    dims      : latent dims to include (default: all with a saved .npy file)
-    """
-    Path(RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+def diagonal_gaussian_stats(real: np.ndarray, gen: np.ndarray, eps: float = 1e-8):
+    real_mean = real.mean(axis=0)
+    gen_mean = gen.mean(axis=0)
 
-    # ── which dims are available ───────────────────────────────────────────────
-    candidate_dims = dims or LATENT_DIMS
-    dims_to_plot = []
-    for d in candidate_dims:
-        p = Path(LATENT_DIR) / f"latents_{d}.npy"
-        if p.exists():
-            dims_to_plot.append(d)
-        else:
-            print(f"  [skip] latents_{d}.npy not found — run step1 first.")
+    real_std = real.std(axis=0) + eps
+    gen_std = gen.std(axis=0) + eps
 
-    if not dims_to_plot:
-        print("No latent files found. Skipping latent space visualisation.")
-        return
+    mean_l2 = np.linalg.norm(real_mean - gen_mean)
+    mean_l2_per_dim = mean_l2 / np.sqrt(real.shape[1])
 
-    # ── shared sample indices ─────────────────────────────────────────────────
-    print("Loading CIFAR-10 labels...")
-    labels_full = load_cifar10_labels(DATA_DIR)
-    N = len(labels_full)
-    rng = np.random.default_rng(0)
-    idx = rng.choice(N, size=min(n_samples, N), replace=False)
-    labels = labels_full[idx]
+    log_std_diff = np.abs(np.log(gen_std) - np.log(real_std))
 
-    print(f"Method: {method.upper()}  |  Samples per space: {len(idx)}")
+    std_ratio = gen_std / real_std
+    std_ratio_median = np.median(std_ratio)
+    std_ratio_p10 = np.percentile(std_ratio, 10)
+    std_ratio_p90 = np.percentile(std_ratio, 90)
 
-    # ── figure layout ─────────────────────────────────────────────────────────
-    n_panels = len(dims_to_plot) + 1   # +1 for pixel space
-    n_cols   = min(4, n_panels)
-    n_rows   = (n_panels + n_cols - 1) // n_cols
+    return {
+        "mean_l2": float(mean_l2),
+        "mean_l2_per_sqrt_dim": float(mean_l2_per_dim),
+        "mean_abs_log_std_diff": float(log_std_diff.mean()),
+        "median_std_ratio_gen_over_real": float(std_ratio_median),
+        "p10_std_ratio": float(std_ratio_p10),
+        "p90_std_ratio": float(std_ratio_p90),
+    }
 
-    fig, axes = plt.subplots(
-        n_rows, n_cols,
-        figsize=(4.8 * n_cols, 4.5 * n_rows),
-    )
-    axes_flat = np.array(axes).reshape(-1)
 
-    panel = 0
+def covariance_spectrum_stats(real: np.ndarray, gen: np.ndarray, n_components: int = 50):
+    scaler_mean = real.mean(axis=0, keepdims=True)
+    scaler_std = real.std(axis=0, keepdims=True) + 1e-8
 
-    # ── pixel space ───────────────────────────────────────────────────────────
-    print("\n[pixel space]  3072D")
-    pixels = load_pixel_space(DATA_DIR)[idx]
-    xy_px  = reduce_2d(pixels, method)
-    draw_panel(axes_flat[panel], xy_px, labels,
-               f"Pixel Space  (3072D → 2D  {method.upper()})")
-    panel += 1
-    del pixels, xy_px
+    real_z = (real - scaler_mean) / scaler_std
+    gen_z = (gen - scaler_mean) / scaler_std
 
-    # ── latent spaces ─────────────────────────────────────────────────────────
-    for d in dims_to_plot:
-        print(f"[latent  dim={d}]  {d}D")
-        latents = np.load(Path(LATENT_DIR) / f"latents_{d}.npy")[idx]
-        xy      = reduce_2d(latents, method)
-        draw_panel(axes_flat[panel], xy, labels,
-                   f"Latent  dim={d}  ({d}D → 2D  {method.upper()})")
-        panel += 1
-        del latents, xy
+    pca_real = PCA(n_components=n_components, random_state=0).fit(real_z)
+    pca_gen = PCA(n_components=n_components, random_state=0).fit(gen_z)
 
-    # Hide unused axes
-    for ax in axes_flat[panel:]:
-        ax.set_visible(False)
+    real_ev = pca_real.explained_variance_ratio_
+    gen_ev = pca_gen.explained_variance_ratio_
 
-    # ── shared legend ─────────────────────────────────────────────────────────
-    legend_handles = [
-        plt.Line2D([0], [0], marker="o", color="w",
-                   markerfacecolor=PALETTE[i], markersize=8,
-                   label=CIFAR10_CLASSES[i])
-        for i in range(10)
-    ]
-    fig.legend(handles=legend_handles, loc="lower center", ncol=5,
-               fontsize=9, frameon=False, bbox_to_anchor=(0.5, -0.03))
+    return {
+        "real_top1_var": float(real_ev[0]),
+        "real_top10_var": float(real_ev[:10].sum()),
+        "real_top50_var": float(real_ev[:50].sum()),
+        "gen_top1_var": float(gen_ev[0]),
+        "gen_top10_var": float(gen_ev[:10].sum()),
+        "gen_top50_var": float(gen_ev[:50].sum()),
+        "abs_top50_spectrum_diff": float(np.abs(real_ev - gen_ev).sum()),
+        "real_spectrum": real_ev.tolist(),
+        "gen_spectrum": gen_ev.tolist(),
+    }
 
-    fig.suptitle(
-        f"Latent Space Distribution — 2D Projection  "
-        f"({method.upper()}, n={len(idx)} per space)",
-        fontsize=13, fontweight="bold", y=1.01,
-    )
+
+def mmd_rbf(real: np.ndarray, gen: np.ndarray, max_n: int = 3000, seed: int = 0):
+    rng = np.random.default_rng(seed)
+    n = min(len(real), len(gen), max_n)
+
+    real = real[rng.choice(len(real), size=n, replace=False)]
+    gen = gen[rng.choice(len(gen), size=n, replace=False)]
+
+    # standardize using real statistics
+    mean = real.mean(axis=0, keepdims=True)
+    std = real.std(axis=0, keepdims=True) + 1e-8
+    x = (real - mean) / std
+    y = (gen - mean) / std
+
+    # median heuristic on subset
+    xy = np.concatenate([x[:1000], y[:1000]], axis=0)
+    dists = np.sum((xy[:, None, :] - xy[None, :, :]) ** 2, axis=-1)
+    median_sq = np.median(dists[dists > 0])
+    gamma = 1.0 / (2.0 * median_sq + 1e-8)
+
+    def kernel(a, b):
+        d = np.sum((a[:, None, :] - b[None, :, :]) ** 2, axis=-1)
+        return np.exp(-gamma * d)
+
+    kxx = kernel(x, x).mean()
+    kyy = kernel(y, y).mean()
+    kxy = kernel(x, y).mean()
+
+    return float(kxx + kyy - 2.0 * kxy)
+
+
+def plot_norm_hist(dim: int, real: np.ndarray, gen: np.ndarray):
+    real_norm = np.linalg.norm(real, axis=1)
+    gen_norm = np.linalg.norm(gen, axis=1)
+
+    plt.figure(figsize=(8, 5))
+    plt.hist(real_norm, bins=80, alpha=0.5, density=True, label="real CIFAR latents")
+    plt.hist(gen_norm, bins=80, alpha=0.5, density=True, label="teacher generated latents")
+    plt.title(f"Latent norm distribution — dim={dim}")
+    plt.xlabel("||z||")
+    plt.ylabel("density")
+    plt.legend()
+    plt.grid(alpha=0.3)
     plt.tight_layout()
-
-    out = Path(RESULTS_DIR) / f"latent_space_2d_{method}.png"
-    plt.savefig(str(out), dpi=150, bbox_inches="tight")
+    plt.savefig(OUT_DIR / f"norm_hist_dim_{dim}.png", dpi=150)
     plt.close()
-    print(f"\nSaved → {out}")
 
 
-# ── CLI entry point ───────────────────────────────────────────────────────────
+def plot_pca_spectrum(dim: int, spec):
+    real = np.array(spec["real_spectrum"])
+    gen = np.array(spec["gen_spectrum"])
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(real, marker="o", label="real CIFAR latents")
+    plt.plot(gen, marker="o", label="teacher generated latents")
+    plt.title(f"PCA spectrum comparison — dim={dim}")
+    plt.xlabel("principal component")
+    plt.ylabel("explained variance ratio")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(OUT_DIR / f"pca_spectrum_dim_{dim}.png", dpi=150)
+    plt.close()
+
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Visualise latent space distributions in 2D."
-    )
-    parser.add_argument(
-        "--method", choices=["pca", "tsne", "umap"], default="pca",
-        help="Dimensionality-reduction method (default: pca).",
-    )
-    parser.add_argument(
-        "--n-samples", type=int, default=5000,
-        help="Points to sample per space (default 5000).",
-    )
-    parser.add_argument(
-        "--dims", type=int, nargs="+", default=None,
-        help="Latent dims to include (default: all with a saved .npy file).",
-    )
-    args = parser.parse_args()
-    run(method=args.method, n_samples=args.n_samples, dims=args.dims)
+    summary = {}
+
+    for dim in LATENT_DIMS:
+        print(f"\n=== dim={dim} ===")
+
+        real = load_real_latents(dim)
+        gen = load_teacher_latents(dim)
+        real, gen = sample_same_size(real, gen)
+
+        diag = diagonal_gaussian_stats(real, gen)
+        spec = covariance_spectrum_stats(real, gen)
+        mmd = mmd_rbf(real, gen)
+
+        summary[str(dim)] = {
+            "diagonal_stats": diag,
+            "pca_stats": {k: v for k, v in spec.items() if not k.endswith("spectrum")},
+            "mmd_rbf": mmd,
+        }
+
+        print(json.dumps(summary[str(dim)], indent=2))
+
+        plot_norm_hist(dim, real, gen)
+        plot_pca_spectrum(dim, spec)
+
+    out_json = OUT_DIR / "teacher_latent_distribution_summary.json"
+    with open(out_json, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"\nSaved summary → {out_json}")
+    print(f"Saved plots   → {OUT_DIR}/")
 
 
 if __name__ == "__main__":
