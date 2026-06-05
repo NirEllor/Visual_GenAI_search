@@ -38,6 +38,17 @@ class ConvAutoencoder(nn.Module):
             kernel_size=1
         )
 
+        # Extra decoder refinement at 4×4 before upsampling
+        self.decoder_refine = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+        )
+
         self.decoder_conv = nn.Sequential(
             nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),  # (B, 32, 8, 8)
             nn.BatchNorm2d(32),
@@ -67,7 +78,8 @@ class ConvAutoencoder(nn.Module):
 
     def decode(self, latent: torch.Tensor) -> torch.Tensor:
         x = latent.view(-1, self.latent_channels, 4, 4)  # (B, C, 4, 4)
-        x = self.decoder_proj(x)                         # (B, 64, 4, 4)
+        x = self.decoder_proj(x)  # (B, 64, 4, 4)
+        x = self.decoder_refine(x)  # (B, 64, 4, 4)
         return self.decoder_conv(x)
 
     def forward(self, x: torch.Tensor):
