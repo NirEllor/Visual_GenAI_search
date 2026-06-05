@@ -33,7 +33,7 @@ import torchvision
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-LATENT_DIMS = [8, 16, 32, 64, 128, 256, 384]
+LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
 LATENT_DIR  = "latents"
 DATA_DIR    = "data"
 RESULTS_DIR = "results"
