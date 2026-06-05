@@ -49,6 +49,12 @@ echo "$OUT1"
 IDS1=$(ids_from "step1" "$OUT1")
 DEP1=$(ids_to_dep "$IDS1")
 
+# ── Visualize Latents (depends on step1) ──────────────────────────────────────
+echo ""
+echo "=== Visualize Latent Spaces ==="
+OUTVIZ=$(bash "$SCRIPT_DIR/run_visualize_latents.sh" pca 5000 64 128 256 384 512 1024 "$DEP1")
+echo "$OUTVIZ"
+
 # ── Step 2: Train Teachers (depends on step1) ──────────────────────────────────
 echo ""
 echo "=== Step 2: Train Teachers ==="

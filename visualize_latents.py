@@ -119,6 +119,53 @@ def mmd_rbf(real: np.ndarray, gen: np.ndarray, max_n: int = 3000, seed: int = 0)
 
     return float(kxx + kyy - 2.0 * kxy)
 
+from sklearn.manifold import TSNE
+
+def plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    n = min(n, len(real), len(gen))
+
+    real_s = real[rng.choice(len(real), size=n, replace=False)]
+    gen_s = gen[rng.choice(len(gen), size=n, replace=False)]
+
+    X = np.concatenate([real_s, gen_s], axis=0)
+    y = np.array([0] * n + [1] * n)
+
+    X = (X - real_s.mean(axis=0, keepdims=True)) / (real_s.std(axis=0, keepdims=True) + 1e-8)
+
+    if method == "tsne":
+        xy = TSNE(
+            n_components=2,
+            perplexity=40,
+            max_iter=1000,
+            random_state=seed,
+            init="pca",
+            learning_rate="auto",
+        ).fit_transform(X)
+
+    elif method == "umap":
+        import umap
+        xy = umap.UMAP(
+            n_components=2,
+            n_neighbors=30,
+            min_dist=0.1,
+            random_state=seed,
+        ).fit_transform(X)
+
+    else:
+        raise ValueError(method)
+
+    plt.figure(figsize=(7, 6))
+    plt.scatter(xy[y == 0, 0], xy[y == 0, 1], s=5, alpha=0.45, label="real CIFAR latents")
+    plt.scatter(xy[y == 1, 0], xy[y == 1, 1], s=5, alpha=0.45, label="teacher latents")
+    plt.title(f"{method.upper()} real vs teacher — dim={dim}")
+    plt.xticks([])
+    plt.yticks([])
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(OUT_DIR / f"{method}_real_vs_teacher_dim_{dim}.png", dpi=150)
+    plt.close()
+
 
 def plot_norm_hist(dim: int, real: np.ndarray, gen: np.ndarray):
     real_norm = np.linalg.norm(real, axis=1)
@@ -178,6 +225,8 @@ def main():
 
         plot_norm_hist(dim, real, gen)
         plot_pca_spectrum(dim, spec)
+        plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=2000)
+        plot_2d_real_vs_teacher(dim, real, gen, method="umap", n=3000)
 
     out_json = OUT_DIR / "teacher_latent_distribution_summary.json"
     with open(out_json, "w") as f:
