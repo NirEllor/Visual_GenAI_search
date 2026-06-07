@@ -33,6 +33,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from models.denoiser import StudentDenoiser, param_count
+from models.denoiser import (
+    StudentDenoiser,
+    load_teacher,
+    param_count,
+)
 
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES = [50_000, 100_000, 150_000, 200_000]
@@ -146,6 +151,19 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     ema_student = create_ema(student, device)
     print(f"  Student params   : {param_count(student)}")
 
+    teacher_ckpt = MODEL_DIR / f"teacher_{dim}.pt"
+
+    teacher = load_teacher(
+        str(teacher_ckpt),
+        latent_dim=dim,
+        device=device
+    )
+
+    teacher.eval()
+
+    for p in teacher.parameters():
+        p.requires_grad_(False)
+
     optimizer = AdamW(student.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=LR * 0.01)
 
@@ -181,7 +199,16 @@ def train_student(dim: int, n_samples: int, device: torch.device,
                 sanity_checked = True
 
             v_pred = student(x_t, t)
-            loss   = F.mse_loss(v_pred, v_target)
+
+            with torch.no_grad():
+                v_teacher = teacher(x_t, t)
+
+            loss_flow = F.mse_loss(v_pred, v_target)
+
+            loss_kd = F.mse_loss(v_pred, v_teacher)
+
+            loss = 0.5 * loss_flow + 0.5 * loss_kd
+
 
             optimizer.zero_grad()
             loss.backward()
@@ -193,7 +220,13 @@ def train_student(dim: int, n_samples: int, device: torch.device,
 
             if (batch_idx + 1) % LOG_INTERVAL == 0:
                 avg = total_loss / (batch_idx + 1)
-                print(f"      [ep {epoch:03d} step {batch_idx+1:05d}]  loss={avg:.5f}", flush=True)
+                print(
+                    f"[ep {epoch:03d} step {batch_idx + 1:05d}] "
+                    f"loss={avg:.5f} "
+                    f"flow={loss_flow.item():.5f} "
+                    f"kd={loss_kd.item():.5f}",
+                    flush=True
+                )
 
         scheduler.step()
         avg_loss = total_loss / len(loader)
