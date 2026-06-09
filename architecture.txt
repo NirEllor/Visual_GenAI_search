@@ -156,15 +156,19 @@ Step 2 — Teacher training  (step2_train_teachers.py)
                 (keys: model_state_dict, latent_dim, latent_mean, latent_std, loss_history)
 
 Step 3b — Student distillation  (step3b_distill.py)
-  Approach    : dataset distillation — student trains on teacher-generated synthetic data
+  Approach    : combined flow matching + knowledge distillation
   Input       : synthetic/{dim}/synthetic_{dim}_{n}.npy  (normalised latents)
-  Epochs      : 100
+                + frozen teacher checkpoint models/teacher_{dim}.pt
+  Epochs      : 1000
   Batch size  : 256
   Optimizer   : AdamW  (lr=1e-4, weight_decay=1e-4)
   LR schedule : CosineAnnealingLR  (T_max=epochs, η_min=lr·0.01)
   Gradient clip: 1.0  (global norm)
   EMA decay   : 0.9999
-  Loss        : MSE( v_pred, v_true )   [pure flow matching, no teacher KD loss]
+  Loss        : 0.5 · MSE(v_pred, v_target) + 0.5 · MSE(v_pred, v_teacher)
+                  loss_flow = MSE( v_pred, x_1 − x_0 )          [flow matching]
+                  loss_kd   = MSE( v_pred, teacher(x_t, t) )    [KD imitation]
+                  x_1 and t sampled once per batch; shared by x_t, v_target, and teacher call
   Output      : models/student_{dim}_{n_samples}.pt
 
 Latent normalisation

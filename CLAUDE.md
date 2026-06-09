@@ -34,7 +34,7 @@ git push
 
 **Goal:** Study how latent space dimensionality (64, 128, 256, 384, 512, 1024) and synthetic dataset size (250k, 500k, 1M, 2M) affect the FID score of distilled flow matching models.
 
-**Distillation approach:** Dataset distillation — the teacher generates large synthetic latent datasets via Euler sampling; students are trained from scratch on this synthetic data using a pure flow matching loss.
+**Distillation approach:** Dataset distillation — the teacher generates large synthetic latent datasets via Euler sampling; students are trained from scratch on this synthetic data using a combined loss (50% flow matching on the synthetic data + 50% KD imitation of the frozen teacher).
 
 ### Generative Model: Rectified Flow / Flow Matching
 
@@ -109,9 +109,10 @@ Guided_Research/
 - Save: `synthetic/{dim}/synthetic_{dim}_{n}.npy`, `synthetic/{dim}/trajectories_{dim}.npy`
 
 **Step 3b — `step3b_distill.py`**
-- Train 24 students (6 dims × 4 sizes) — each `StudentDenoiser` (2 res blocks, hidden_dim=256)
-- Pure flow matching loss: sample x_1, t once per batch → x_t and v_target share the same x_1
-- 100 epochs, AdamW lr=1e-4, cosine LR decay, EMA (decay=0.9999), batch_size=256
+- Train 24 students (6 dims × 4 sizes) — each `StudentDenoiser` (4 res blocks, hidden_channels scales with dim)
+- Combined loss: 0.5 · flow_matching + 0.5 · KD imitation of frozen teacher
+- x_1 and t sampled once per batch; shared by x_t, v_target, and the teacher call
+- 1000 epochs, AdamW lr=1e-4, cosine LR decay, EMA (decay=0.9999), batch_size=256
 - Save: `models/student_{dim}_{n_samples}.pt`
 
 **Step 4 — `step4_evaluate.py`**
