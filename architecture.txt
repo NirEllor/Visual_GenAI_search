@@ -33,6 +33,9 @@ Decoder  (mirrors encoder)
 -------
   Reshape z   (B, latent_dim) → (B, C, 4, 4)
   decoder_proj : Conv2d(C→64, 1×1)                                    # (B, 64, 4, 4)
+  decoder_refine (stays at 4×4 before upsampling):
+    Conv2d(64→64, 3×3, padding=1) → BatchNorm2d(64) → ReLU           # (B, 64, 4, 4)
+    Conv2d(64→64, 3×3, padding=1) → BatchNorm2d(64) → ReLU           # (B, 64, 4, 4)
   ConvTranspose2d(64→32, 3×3, stride=2, padding=1, out_padding=1) → BatchNorm2d(32) → ReLU  # (B, 32, 8, 8)
   ConvTranspose2d(32→16, 3×3, stride=2, padding=1, out_padding=1) → BatchNorm2d(16) → ReLU  # (B, 16, 16, 16)
   ConvTranspose2d(16→3,  3×3, stride=2, padding=1, out_padding=1)                            # (B, 3, 32, 32)
@@ -115,7 +118,7 @@ Full forward pass
        → flatten  →  v_pred (B, latent_dim)
 
 Teacher (step 2)
-  n_blocks       : 4
+  n_blocks       : 8
   hidden_channels: max(256, latent_channels × 8)   [scales with latent_dim]
   e.g. dim=64  → C=4,   hidden=256
        dim=128 → C=8,   hidden=256
@@ -125,7 +128,7 @@ Teacher (step 2)
        dim=1024→ C=64,  hidden=512
 
 Student (step 3b)
-  n_blocks       : 2
+  n_blocks       : 4
   hidden_channels: max(128, latent_channels × 8)   [scales with latent_dim]
   e.g. dim=64  → C=4,   hidden=128
        dim=128 → C=8,   hidden=128
