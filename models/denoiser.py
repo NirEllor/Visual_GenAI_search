@@ -126,7 +126,7 @@ class ConvDenoiser(nn.Module):
         -------
         v : (B, latent_dim)  predicted velocity
         """
-        t_emb = self.time_embed(t * 1000)                          # (B, time_emb_dim)
+        t_emb = self.time_embed(t)
         h = x.view(-1, self.latent_channels, 4, 4)                 # (B, C, 4, 4)
         h = self.input_proj(h)                                     # (B, hidden_channels, 4, 4)
         for block in self.blocks:
@@ -139,7 +139,9 @@ class ConvDenoiser(nn.Module):
 class TeacherDenoiser(ConvDenoiser):
     """Large teacher: 4 conv residual blocks, hidden_channels scales with latent channels."""
 
-    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 8):
+    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 4):
+        if latent_dim % 16 != 0:
+            raise ValueError("latent_dim must be divisible by 16.")
         latent_channels = latent_dim // 16
         if hidden_channels is None:
             hidden_channels = max(256, latent_channels * 8)
@@ -155,6 +157,8 @@ class StudentDenoiser(ConvDenoiser):
     """Student: conv residual blocks, hidden_channels scales with latent channels."""
 
     def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 2):
+        if latent_dim % 16 != 0:
+            raise ValueError("latent_dim must be divisible by 16.")
         latent_channels = latent_dim // 16
 
         if hidden_channels is None:

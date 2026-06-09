@@ -20,14 +20,15 @@ from models.diffusion import FlowMatching
 from models.denoiser import TeacherDenoiser, param_count
 
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
-EPOCHS       = 1000
+EPOCHS       = 700
 BATCH_SIZE   = 256
 LR           = 3e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP    = 1.0
 SAVE_EVERY   = 50
 EMA_DECAY    = 0.9999
-
+EARLY_STOP_PATIENCE = 100
+EARLY_STOP_MIN_DELTA = 1e-4
 LATENT_DIR   = "latents"
 MODEL_DIR    = "models"
 LOG_INTERVAL = 10
@@ -149,22 +150,37 @@ def main():
         scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=LR * 0.01)
 
         best_loss = float("inf")
-        history   = []
+        best_epoch = 0
+        epochs_without_improvement = 0
+        history = []
+        best_state = None
 
         for epoch in tqdm(range(1, EPOCHS + 1), desc=f"dim={dim}"):
             avg_loss = train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch)
             scheduler.step()
             history.append(avg_loss)
 
-            if avg_loss < best_loss:
+            if avg_loss < best_loss - EARLY_STOP_MIN_DELTA:
                 best_loss = avg_loss
+                best_epoch = epoch
+                epochs_without_improvement = 0
+                best_state = deepcopy(ema_model.state_dict())
+            else:
+                epochs_without_improvement += 1
 
             if epoch % SAVE_EVERY == 0:
                 interim = Path(MODEL_DIR) / f"teacher_{dim}_ep{epoch:03d}.pt"
                 torch.save({"model_state_dict": ema_model.state_dict()}, interim)
 
             print(f"  epoch {epoch:03d}  avg_loss={avg_loss:.5f}  best={best_loss:.5f}")
-
+            if epochs_without_improvement >= EARLY_STOP_PATIENCE:
+                print(
+                    f"  Early stopping at epoch {epoch:03d}. "
+                    f"Best epoch={best_epoch:03d}, best_loss={best_loss:.5f}"
+                )
+                break
+        if best_state is not None:
+            ema_model.load_state_dict(best_state)
         torch.save(
             {
                 "model_state_dict": ema_model.state_dict(),

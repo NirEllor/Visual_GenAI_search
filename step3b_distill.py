@@ -41,7 +41,7 @@ from models.denoiser import (
 
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES = [50_000, 100_000, 150_000, 200_000]
-EPOCHS        = 500
+EPOCHS        = 400
 BATCH_SIZE    = 256
 LR            = 1e-4
 WEIGHT_DECAY  = 1e-4
@@ -112,6 +112,7 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     stats = np.load(stats_path)
     lat_mean = stats[0].astype(np.float32)
     lat_std = stats[1].astype(np.float32)
+    lat_std_t = torch.from_numpy(lat_std).float().to(device).view(1, -1)
     # ── dataset ───────────────────────────────────────────────────────────────
     size_gb = n_samples * dim * 4 / 1e9
     print(f"\n  dim={dim}  n={n_samples:,}  device={device}")
@@ -203,9 +204,12 @@ def train_student(dim: int, n_samples: int, device: torch.device,
             with torch.no_grad():
                 v_teacher = teacher(x_t, t)
 
-            loss_flow = F.mse_loss(v_pred, v_target)
+            v_pred_norm = v_pred / (lat_std_t + 1e-6)
+            v_target_norm = v_target / (lat_std_t + 1e-6)
+            v_teacher_norm = v_teacher / (lat_std_t + 1e-6)
 
-            loss_kd = F.mse_loss(v_pred, v_teacher)
+            loss_flow = F.mse_loss(v_pred_norm, v_target_norm)
+            loss_kd = F.mse_loss(v_pred_norm, v_teacher_norm)
 
             loss = 0.5 * loss_flow + 0.5 * loss_kd
 
