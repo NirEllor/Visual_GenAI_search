@@ -32,7 +32,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from models.denoiser import StudentDenoiser, param_count
 from models.denoiser import (
     StudentDenoiser,
     load_teacher,

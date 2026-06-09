@@ -16,6 +16,7 @@ OUT_DIR = Path("results/teacher_latent_analysis")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+
 def load_real_latents(dim: int) -> np.ndarray:
     return np.load(LATENT_DIR / f"latents_{dim}.npy").astype(np.float32)
 

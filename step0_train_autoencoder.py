@@ -27,9 +27,6 @@ BATCH_SIZE   = 128
 LR           = 2e-3
 WEIGHT_DECAY = 0
 GRAD_CLIP    = 5.0
-LPIPS_WEIGHT = 1.0
-L1_WEIGHT    = 0.0
-KL_WEIGHT    = 0.001  # β-KL: forces latent space toward N(0,I) for flow matching
 CKPT_DIR     = Path("checkpoints")
 
 
@@ -58,7 +55,6 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
     for p in lpips_fn.parameters():
         p.requires_grad = False
-    l1_fn    = nn.L1Loss()
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Parameters: {n_params:,}")
@@ -73,7 +69,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
         for imgs, _ in tqdm(loader, desc=f"  Epoch {epoch}/{EPOCHS}", leave=False):
             imgs = imgs.to(device)
 
-            recon_logits, mean, logvar = model(imgs)
+            recon_logits = model(imgs)
             recon_for_loss = torch.sigmoid(recon_logits)
 
             recon_lpips = F.interpolate(
@@ -95,11 +91,8 @@ def train_one_dim(dim: int, device: torch.device) -> None:
                 imgs_lpips * 2 - 1
             ).mean()
 
-            l1_loss = l1_fn(recon_for_loss, imgs)
 
-            kl_loss = -0.5 * (1 + logvar - mean.pow(2) - logvar.exp()).mean()
-
-            loss = LPIPS_WEIGHT * lpips_loss + L1_WEIGHT * l1_loss + KL_WEIGHT * kl_loss
+            loss = lpips_loss
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
@@ -116,7 +109,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             torch.save({"latent_dim": dim, "state_dict": model.state_dict()}, save_path)
 
         if epoch % 10 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{EPOCHS}  loss(lpips+l1)={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
+            print(f"  Epoch {epoch:3d}/{EPOCHS}  loss(lpips)={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
                   f"{'  [saved]' if avg_loss == best_loss else ''}")
 
     print(f"Done. Best loss={best_loss:.6f}  →  {save_path}")

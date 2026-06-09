@@ -191,7 +191,7 @@ def decode(dim: int, size: Optional[int]) -> None:
     img_idx = 0
     with torch.no_grad():
         for imgs, _ in tqdm(loader, desc="  AE recon", leave=False):
-            recon_logits, _, _ = ae(imgs.to(device))
+            recon_logits = ae(imgs.to(device))
             recon = (torch.sigmoid(recon_logits).clamp(0, 1) * 255).byte().cpu().numpy()
             recon = recon.transpose(0, 2, 3, 1)
             for img_arr in recon:

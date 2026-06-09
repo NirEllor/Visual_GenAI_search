@@ -82,7 +82,7 @@ def eval_one_dim(dim: int, device: torch.device) -> float:
     with torch.no_grad():
         for imgs, _ in tqdm(loader, desc=f"  Reconstructing (dim={dim})"):
             imgs  = imgs.to(device)
-            recon_logits, _, _ = model(imgs)
+            recon_logits = model(imgs)
             recon = torch.sigmoid(recon_logits)
 
             l1_sum += torch.sum(torch.abs(recon - imgs)).item()
