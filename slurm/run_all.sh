@@ -26,25 +26,45 @@ echo "  Full Pipeline Submission"
 echo "=================================================="
 
 # ── Step 0: Train AutoEncoders ──────────────────────────────────────────────────
+#echo ""
+#echo "=== Step 0: Train AutoEncoders ==="
+#OUT0=$(bash "$SCRIPT_DIR/run_step0.sh")
+#echo "$OUT0"
+#IDS0=$(ids_from "step0" "$OUT0")
+#DEP0=$(ids_to_dep "$IDS0")
+
 echo ""
 echo "=== Step 0: Train AutoEncoders ==="
-OUT0=$(bash "$SCRIPT_DIR/run_step0.sh")
-echo "$OUT0"
-IDS0=$(ids_from "step0" "$OUT0")
-DEP0=$(ids_to_dep "$IDS0")
+echo "[skip] Using existing AE checkpoints."
+
+for dim in 64 128 256 384 512 1024; do
+  if [ ! -f "checkpoints/ae_${dim}.pt" ]; then
+    echo "[ERROR] Missing checkpoints/ae_${dim}.pt"
+    exit 1
+  fi
+done
+
+DEP0=""
 
 # ── Step 0b: Eval AutoEncoders (depends on step0) ──────────────────────────────
 echo ""
 echo "=== Step 0b: Eval AutoEncoders ==="
-OUT0B=$(bash "$SCRIPT_DIR/run_step0b.sh" "$DEP0")
+#OUT0B=$(bash "$SCRIPT_DIR/run_step0b.sh" "$DEP0")
+OUT0B=$(bash "$SCRIPT_DIR/run_step0b.sh")
 echo "$OUT0B"
 IDS0B=$(ids_from "step0b" "$OUT0B")
+if [ -z "$IDS0B" ]; then
+  echo "[ERROR] Failed to parse step0b job IDs"
+  exit 1
+fi
 
 # ── Step 1: Extract Latents (depends on step0 + step0b) ────────────────────────
 echo ""
 echo "=== Step 1: Extract Latents ==="
-DEP0_AND_0B="afterok:$(echo "$IDS0 $IDS0B" | tr ' ' ':')"
-OUT1=$(bash "$SCRIPT_DIR/run_step1.sh" "$DEP0_AND_0B")
+#DEP0_AND_0B="afterok:$(echo "$IDS0 $IDS0B" | tr ' ' ':')"
+#OUT1=$(bash "$SCRIPT_DIR/run_step1.sh" "$DEP0_AND_0B")
+DEP0B=$(ids_to_dep "$IDS0B")
+OUT1=$(bash "$SCRIPT_DIR/run_step1.sh" "$DEP0B")
 echo "$OUT1"
 IDS1=$(ids_from "step1" "$OUT1")
 DEP1=$(ids_to_dep "$IDS1")
@@ -96,7 +116,8 @@ echo ""
 echo "=================================================="
 echo "  Submission complete"
 echo "=================================================="
-echo "  step0   job IDs : $IDS0"
+echo "  step0   job IDs : skipped"
+echo "  step0b  job IDs : $IDS0B"
 echo "  step1   job IDs : $IDS1"
 echo "  step2   job IDs : $IDS2"
 echo "  step3a  job IDs : $IDS3A"
