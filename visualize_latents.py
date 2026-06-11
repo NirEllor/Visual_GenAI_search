@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-
+import argparse
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -201,11 +201,16 @@ def plot_pca_spectrum(dim: int, spec):
     plt.savefig(OUT_DIR / f"pca_spectrum_dim_{dim}.png", dpi=150)
     plt.close()
 
-
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--method", choices=["pca", "tsne", "umap", "all"], default="all")
+    parser.add_argument("--n-samples", type=int, default=3000)
+    parser.add_argument("--dims", type=int, nargs="+", default=LATENT_DIMS)
+    args = parser.parse_args()
+
     summary = {}
 
-    for dim in LATENT_DIMS:
+    for dim in args.dims:
         print(f"\n=== dim={dim} ===")
 
         real = load_real_latents(dim)
@@ -224,10 +229,18 @@ def main():
 
         print(json.dumps(summary[str(dim)], indent=2))
 
-        plot_norm_hist(dim, real, gen)
-        plot_pca_spectrum(dim, spec)
-        plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=2000)
-        plot_2d_real_vs_teacher(dim, real, gen, method="umap", n=3000)
+        if args.method in ["pca", "all"]:
+            plot_norm_hist(dim, real, gen)
+            plot_pca_spectrum(dim, spec)
+
+        if args.method in ["tsne", "all"]:
+            plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=args.n_samples)
+
+        if args.method in ["umap", "all"]:
+            try:
+                plot_2d_real_vs_teacher(dim, real, gen, method="umap", n=args.n_samples)
+            except ModuleNotFoundError:
+                print("  [warning] umap-learn not installed — skipping UMAP.")
 
     out_json = OUT_DIR / "teacher_latent_distribution_summary.json"
     with open(out_json, "w") as f:
