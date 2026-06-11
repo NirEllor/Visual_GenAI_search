@@ -28,7 +28,7 @@ JOB=$(sbatch $DEP_FLAG \
   -c4 \
   --time=03:00:00 \
   --gres=gpu:0 \
-  --mail-type=FAIL,END \
+  --mail-type=ALL,END \
   --mail-user="$EMAIL" \
   --job-name=viz_latents_${METHOD} \
   --wrap "bash -c '$RUN python3 visualize_latents.py --method $METHOD --n-samples $N_SAMPLES --dims ${DIMS[*]}'" \

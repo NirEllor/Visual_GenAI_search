@@ -3,7 +3,7 @@ Step 3a — Generate synthetic latent datasets from trained teacher models.
 
 For each latent dim:
   - Runs teacher Euler sampling to produce 4 synthetic x_0 datasets:
-      250k, 500k, 1M, 2M samples (normalized latents, float32)
+      50k, 100k, 150k, 200k samples (normalized latents, float32)
     Saves: synthetic/{dim}/synthetic_{dim}_{n}.npy
   - Generates a trajectory dataset for TRAJ_SAMPLES samples:
       shape (TRAJ_SAMPLES, EULER_STEPS+1, dim), float16
@@ -131,7 +131,7 @@ def generate_for_dim(dim: int, device: torch.device) -> None:
         generate_dataset(model, flow, dim, n, out_path)
 
     # ── trajectory dataset (250k only, float16) ───────────────────────────────
-    traj_path = dim_dir / f"trajectories_{dim}.npy"
+    # traj_path = dim_dir / f"trajectories_{dim}.npy"
     if traj_path.exists():
         print(f"  [skip] {traj_path.name} already exists.")
     else:

@@ -28,6 +28,8 @@ LR           = 2e-3
 WEIGHT_DECAY = 0
 GRAD_CLIP    = 5.0
 CKPT_DIR     = Path("checkpoints")
+LPIPS_WEIGHT = 1.0
+KL_WEIGHT    = 0.001
 
 
 def get_cifar10_loader(batch_size: int) -> DataLoader:
@@ -69,7 +71,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
         for imgs, _ in tqdm(loader, desc=f"  Epoch {epoch}/{EPOCHS}", leave=False):
             imgs = imgs.to(device)
 
-            recon_logits = model(imgs)
+            recon_logits, mean, logvar = model(imgs)
             recon_for_loss = torch.sigmoid(recon_logits)
 
             recon_lpips = F.interpolate(
@@ -91,8 +93,8 @@ def train_one_dim(dim: int, device: torch.device) -> None:
                 imgs_lpips * 2 - 1
             ).mean()
 
-
-            loss = lpips_loss
+            kl_loss = -0.5 * (1 + logvar - mean.pow(2) - logvar.exp()).mean()
+            loss = LPIPS_WEIGHT * lpips_loss + KL_WEIGHT * kl_loss
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
@@ -109,8 +111,11 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             torch.save({"latent_dim": dim, "state_dict": model.state_dict()}, save_path)
 
         if epoch % 10 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{EPOCHS}  loss(lpips)={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
-                  f"{'  [saved]' if avg_loss == best_loss else ''}")
+            print(
+                f"  Epoch {epoch:3d}/{EPOCHS}  "
+                f"loss={avg_loss:.4f}  lr={sched.get_last_lr()[0]:.2e}"
+                f"{'  [saved]' if avg_loss == best_loss else ''}"
+            )
 
     print(f"Done. Best loss={best_loss:.6f}  →  {save_path}")
 

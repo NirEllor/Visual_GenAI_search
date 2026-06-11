@@ -16,24 +16,29 @@ class ConvAutoencoder(nn.Module):
 
         # ------------------------------------------------------------------
         # Encoder
-        # Input: (B, 3, 32, 32)
         # ------------------------------------------------------------------
         self.encoder_conv = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),   # (B,16,16,16)
+            nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(16),
             nn.ReLU(inplace=True),
 
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),  # (B,32,8,8)
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
 
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),  # (B,64,4,4)
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
         )
 
-        # Deterministic latent projection
-        self.encoder_latent = nn.Conv2d(
+        # VAE heads
+        self.encoder_mean = nn.Conv2d(
+            in_channels=64,
+            out_channels=self.latent_channels,
+            kernel_size=1
+        )
+
+        self.encoder_logvar = nn.Conv2d(
             in_channels=64,
             out_channels=self.latent_channels,
             kernel_size=1
@@ -48,7 +53,7 @@ class ConvAutoencoder(nn.Module):
             kernel_size=1
         )
 
-        # Important refinement block at 4x4
+        # Important refinement block at 4×4
         self.decoder_refine = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
@@ -66,7 +71,7 @@ class ConvAutoencoder(nn.Module):
                 stride=2,
                 padding=1,
                 output_padding=1
-            ),  # (B,32,8,8)
+            ),
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
 
@@ -76,7 +81,7 @@ class ConvAutoencoder(nn.Module):
                 stride=2,
                 padding=1,
                 output_padding=1
-            ),  # (B,16,16,16)
+            ),
             nn.BatchNorm2d(16),
             nn.ReLU(inplace=True),
 
@@ -86,17 +91,35 @@ class ConvAutoencoder(nn.Module):
                 stride=2,
                 padding=1,
                 output_padding=1
-            )   # (B,3,32,32)
+            )
         )
 
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: torch.Tensor, sample: bool = True):
         """
-        Returns deterministic latent vector.
-        Shape: (B, latent_dim)
+        Returns:
+            z_flat      : (B, latent_dim)
+            mean_flat   : (B, latent_dim)
+            logvar_flat : (B, latent_dim)
+
+        sample=True  -> reparameterization trick
+        sample=False -> deterministic mean
         """
-        h = self.encoder_conv(x)          # (B,64,4,4)
-        z = self.encoder_latent(h)        # (B,C,4,4)
-        return torch.flatten(z, 1)
+        h = self.encoder_conv(x)
+
+        mean = self.encoder_mean(h)
+        logvar = self.encoder_logvar(h).clamp(-30, 20)
+
+        if sample:
+            eps = torch.randn_like(mean)
+            z = mean + eps * torch.exp(0.5 * logvar)
+        else:
+            z = mean
+
+        return (
+            torch.flatten(z, 1),
+            torch.flatten(mean, 1),
+            torch.flatten(logvar, 1),
+        )
 
     def decode(self, latent: torch.Tensor) -> torch.Tensor:
         """
@@ -104,13 +127,18 @@ class ConvAutoencoder(nn.Module):
         No sigmoid is applied here.
         """
         x = latent.view(-1, self.latent_channels, 4, 4)
-        x = self.decoder_proj(x)          # (B,64,4,4)
-        x = self.decoder_refine(x)        # (B,64,4,4)
-        return self.decoder_conv(x)       # (B,3,32,32)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.decoder_proj(x)
+        x = self.decoder_refine(x)
+
+        return self.decoder_conv(x)
+
+    def forward(self, x: torch.Tensor):
         """
-        Returns reconstruction logits.
+        Returns:
+            recon_logits, mean, logvar
         """
-        z = self.encode(x)
-        return self.decode(z)
+        z, mean, logvar = self.encode(x, sample=True)
+        recon_logits = self.decode(z)
+
+        return recon_logits, mean, logvar

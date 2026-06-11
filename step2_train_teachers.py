@@ -20,7 +20,7 @@ from models.diffusion import FlowMatching
 from models.denoiser import TeacherDenoiser, param_count
 
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
-EPOCHS       = 700
+EPOCHS       = 1000
 BATCH_SIZE   = 256
 LR           = 3e-4
 WEIGHT_DECAY = 1e-4
@@ -188,6 +188,8 @@ def main():
                 "latent_mean": torch.from_numpy(mean.astype(np.float32)),
                 "latent_std": torch.from_numpy(std.astype(np.float32)),
                 "loss_history": history,
+                "best_loss": best_loss,
+                "best_epoch": best_epoch,
             },
             out_path,
         )

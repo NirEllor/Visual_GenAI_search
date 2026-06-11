@@ -40,13 +40,15 @@ from models.denoiser import (
 
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES = [50_000, 100_000, 150_000, 200_000]
-EPOCHS        = 400
+EPOCHS        = 500
 BATCH_SIZE    = 256
 LR            = 1e-4
 WEIGHT_DECAY  = 1e-4
 GRAD_CLIP     = 1.0
 EMA_DECAY     = 0.9999
 LOG_INTERVAL  = 50
+EARLY_STOP_PATIENCE = 50
+EARLY_STOP_MIN_DELTA = 1e-4
 
 MODEL_DIR     = Path("models")
 SYNTHETIC_DIR = Path("synthetic")
@@ -103,21 +105,26 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         print(f"  [ERROR] {data_path} not found — run step3a first.")
         return
 
-    # Load norm stats so the student checkpoint can denormalise at eval time
     stats_path = LATENT_DIR / f"latents_{dim}_norm_stats.npy"
     if not stats_path.exists():
         print(f"  [ERROR] {stats_path} not found — run step2 first.")
         return
+
     stats = np.load(stats_path)
     lat_mean = stats[0].astype(np.float32)
     lat_std = stats[1].astype(np.float32)
     lat_std_t = torch.from_numpy(lat_std).float().to(device).view(1, -1)
-    # ── dataset ───────────────────────────────────────────────────────────────
+
     size_gb = n_samples * dim * 4 / 1e9
     print(f"\n  dim={dim}  n={n_samples:,}  device={device}")
     print(f"  Dataset size: {size_gb:.2f} GB")
 
-    x0_data = np.memmap(str(data_path), dtype="float32", mode="r", shape=(n_samples, dim))
+    x0_data = np.memmap(
+        str(data_path),
+        dtype="float32",
+        mode="r",
+        shape=(n_samples, dim)
+    )
 
     if load_to_ram:
         try:
@@ -127,8 +134,10 @@ def train_student(dim: int, n_samples: int, device: torch.device,
             shuffle = True
             print("  Loaded. shuffle=True (random permutation each epoch)")
         except MemoryError:
-            print(f"  [warning] MemoryError — falling back to memmap "
-                  f"(file-backed, shuffle=True via random index access, slower on HDD)")
+            print(
+                f"  [warning] MemoryError — falling back to memmap "
+                f"(file-backed, shuffle=True via random index access, slower on HDD)"
+            )
             x0_tensor = torch.from_numpy(x0_data)
             shuffle = True
     else:
@@ -137,38 +146,53 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         shuffle = True
 
     dataset = TensorDataset(x0_tensor)
-    loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=shuffle,
-                         num_workers=2, pin_memory=True)
+    loader = DataLoader(
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=shuffle,
+        num_workers=2,
+        pin_memory=True,
+    )
 
     steps_per_epoch = len(loader)
-    total_steps     = EPOCHS * steps_per_epoch
+    total_steps = EPOCHS * steps_per_epoch
+
     print(f"  Batch shape      : ({BATCH_SIZE}, {dim})")
     print(f"  Steps per epoch  : {steps_per_epoch:,}")
     print(f"  Total opt. steps : {total_steps:,}")
 
-    # ── model ─────────────────────────────────────────────────────────────────
-    student     = StudentDenoiser(latent_dim=dim).to(device)
+    student = StudentDenoiser(latent_dim=dim).to(device)
     ema_student = create_ema(student, device)
     print(f"  Student params   : {param_count(student)}")
 
     teacher_ckpt = MODEL_DIR / f"teacher_{dim}.pt"
+    if not teacher_ckpt.exists():
+        print(f"  [ERROR] {teacher_ckpt} not found — run step2 first.")
+        return
 
     teacher = load_teacher(
         str(teacher_ckpt),
         latent_dim=dim,
-        device=device
+        device=device,
     )
 
     teacher.eval()
-
     for p in teacher.parameters():
         p.requires_grad_(False)
 
     optimizer = AdamW(student.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=LR * 0.01)
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=EPOCHS,
+        eta_min=LR * 0.01,
+    )
 
-    best_loss      = float("inf")
-    history        = []
+    best_loss = float("inf")
+    best_epoch = 0
+    best_state = None
+    epochs_without_improvement = 0
+
+    history = []
     sanity_checked = False
 
     for epoch in tqdm(range(1, EPOCHS + 1), desc=f"    dim={dim} n={n_samples:,}"):
@@ -177,25 +201,27 @@ def train_student(dim: int, n_samples: int, device: torch.device,
 
         for batch_idx, (x_0,) in enumerate(loader):
             x_0 = x_0.to(device)
-            B   = x_0.shape[0]
+            B = x_0.shape[0]
 
-            # ── sample x_1 and t ONCE — used for both x_t and v_target ───────
             x_1 = torch.randn_like(x_0)
-            t   = torch.rand(B, device=device)
-            t_  = t.view(-1, 1)
+            t = torch.rand(B, device=device)
+            t_ = t.view(-1, 1)
 
-            x_t      = (1.0 - t_) * x_0 + t_ * x_1
-            v_target = x_1 - x_0                 # same x_1 as above
+            x_t = (1.0 - t_) * x_0 + t_ * x_1
+            v_target = x_1 - x_0
 
-            # ── one-time sanity check: verify x_t and v_target share x_1/t ───
             if not sanity_checked:
                 residual = (x_t - (1.0 - t_) * x_0 - t_ * x_1).abs().max().item()
-                assert residual < 1e-5, \
+                assert residual < 1e-5, (
                     f"x_t construction inconsistency — max residual={residual:.2e}"
-                assert torch.allclose(v_target, x_1 - x_0, atol=1e-6), \
+                )
+                assert torch.allclose(v_target, x_1 - x_0, atol=1e-6), (
                     "v_target does not equal x_1 - x_0 from the same x_1"
-                print(f"  [sanity] x_t/v_target consistency check passed "
-                      f"(max residual={residual:.2e})")
+                )
+                print(
+                    f"  [sanity] x_t/v_target consistency check passed "
+                    f"(max residual={residual:.2e})"
+                )
                 sanity_checked = True
 
             v_pred = student(x_t, t)
@@ -212,7 +238,6 @@ def train_student(dim: int, n_samples: int, device: torch.device,
 
             loss = 0.5 * loss_flow + 0.5 * loss_kd
 
-
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(student.parameters(), GRAD_CLIP)
@@ -228,17 +253,38 @@ def train_student(dim: int, n_samples: int, device: torch.device,
                     f"loss={avg:.5f} "
                     f"flow={loss_flow.item():.5f} "
                     f"kd={loss_kd.item():.5f}",
-                    flush=True
+                    flush=True,
                 )
 
         scheduler.step()
+
         avg_loss = total_loss / len(loader)
         history.append(avg_loss)
 
-        if avg_loss < best_loss:
+        if avg_loss < best_loss - EARLY_STOP_MIN_DELTA:
             best_loss = avg_loss
+            best_epoch = epoch
+            epochs_without_improvement = 0
+            best_state = deepcopy(ema_student.state_dict())
+        else:
+            epochs_without_improvement += 1
 
-        print(f"    epoch {epoch:03d}  loss={avg_loss:.5f}  best={best_loss:.5f}")
+        print(
+            f"    epoch {epoch:03d}  "
+            f"loss={avg_loss:.5f}  "
+            f"best={best_loss:.5f}  "
+            f"best_epoch={best_epoch:03d}"
+        )
+
+        if epochs_without_improvement >= EARLY_STOP_PATIENCE:
+            print(
+                f"  Early stopping at epoch {epoch:03d}. "
+                f"Best epoch={best_epoch:03d}, best_loss={best_loss:.5f}"
+            )
+            break
+
+    if best_state is not None:
+        ema_student.load_state_dict(best_state)
 
     torch.save(
         {
@@ -248,12 +294,18 @@ def train_student(dim: int, n_samples: int, device: torch.device,
             "latent_mean": torch.from_numpy(lat_mean.astype(np.float32)),
             "latent_std": torch.from_numpy(lat_std.astype(np.float32)),
             "loss_history": history,
+            "best_loss": best_loss,
+            "best_epoch": best_epoch,
         },
         out_path,
     )
-    print(f"  Saved → {out_path}")
-    plot_loss(history, dim, n_samples)
 
+    print(
+        f"  Saved → {out_path} "
+        f"(best_epoch={best_epoch}, best_loss={best_loss:.5f})"
+    )
+
+    plot_loss(history, dim, n_samples)
 
 def main():
     parser = argparse.ArgumentParser()
