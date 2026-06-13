@@ -131,7 +131,7 @@ def generate_for_dim(dim: int, device: torch.device) -> None:
         generate_dataset(model, flow, dim, n, out_path)
 
     # ── trajectory dataset (250k only, float16) ───────────────────────────────
-    # traj_path = dim_dir / f"trajectories_{dim}.npy"
+    traj_path = dim_dir / f"trajectories_{dim}.npy"
     if traj_path.exists():
         print(f"  [skip] {traj_path.name} already exists.")
     else:
