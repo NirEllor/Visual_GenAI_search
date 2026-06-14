@@ -113,7 +113,6 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     stats = np.load(stats_path)
     lat_mean = stats[0].astype(np.float32)
     lat_std = stats[1].astype(np.float32)
-    lat_std_t = torch.from_numpy(lat_std).float().to(device).view(1, -1)
 
     size_gb = n_samples * dim * 4 / 1e9
     print(f"\n  dim={dim}  n={n_samples:,}  device={device}")
