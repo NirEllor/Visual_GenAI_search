@@ -229,12 +229,9 @@ def train_student(dim: int, n_samples: int, device: torch.device,
             with torch.no_grad():
                 v_teacher = teacher(x_t, t)
 
-            v_pred_norm = v_pred / (lat_std_t + 1e-6)
-            v_target_norm = v_target / (lat_std_t + 1e-6)
-            v_teacher_norm = v_teacher / (lat_std_t + 1e-6)
-
-            loss_flow = F.mse_loss(v_pred_norm, v_target_norm)
-            loss_kd = F.mse_loss(v_pred_norm, v_teacher_norm)
+            loss_flow = F.mse_loss(v_pred, v_target)
+            loss_kd = F.mse_loss(v_pred, v_teacher)
+            loss = 0.5 * loss_flow + 0.5 * loss_kd
 
             loss = 0.5 * loss_flow + 0.5 * loss_kd
 
