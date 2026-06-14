@@ -78,6 +78,30 @@ rm -f results/trained_AE/losses_*.png
 
 ---
 
+## Level 2.5 — Regenerate synthetic datasets (from step 3a)
+
+Keeps: AE checkpoints, raw latents, norm stats, and teacher checkpoints.
+
+```bash
+# Step 3a: Synthetic datasets and trajectories
+rm -rf synthetic/
+
+# Step 3b: Students and their loss plots
+rm -f models/student_*.pt
+rm -f results/trained_AE/student_loss_*.png
+
+# Step 4: All evaluation outputs
+rm -f results/trained_AE/z_orig_*.npy
+rm -rf results/trained_AE/generated_*/
+rm -rf results/trained_AE/ae_reconstructed_*/
+rm -f results/trained_AE/metrics_*.json
+rm -f results/trained_AE/metrics_all.json
+rm -f results/trained_AE/fid_vs_dim.png
+rm -f results/trained_AE/fid_vs_size.png
+```
+
+---
+
 ## Level 3 — Retrain the students (from step 3b)
 
 Keeps: AE, latents, norm stats, teachers, and all synthetic datasets.
