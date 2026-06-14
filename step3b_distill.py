@@ -233,8 +233,6 @@ def train_student(dim: int, n_samples: int, device: torch.device,
             loss_kd = F.mse_loss(v_pred, v_teacher)
             loss = 0.5 * loss_flow + 0.5 * loss_kd
 
-            loss = 0.5 * loss_flow + 0.5 * loss_kd
-
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(student.parameters(), GRAD_CLIP)
