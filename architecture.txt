@@ -122,9 +122,9 @@ Teacher (step 2)
   hidden_channels: max(256, latent_channels × 8)   [scales with latent_dim]
   e.g. dim=64  → C=4,   hidden=256
        dim=128 → C=8,   hidden=256
-       dim=256 → C=16,  hidden=256 (tie)
+       dim=256 → C=16,  hidden=256
        dim=384 → C=24,  hidden=256
-       dim=512 → C=32,  hidden=256
+       dim=512 → C=32,  hidden=256 (tie)
        dim=1024→ C=64,  hidden=512
 
 Student (step 3b)
@@ -159,12 +159,13 @@ Step 3b — Student distillation  (step3b_distill.py)
   Approach    : combined flow matching + knowledge distillation
   Input       : synthetic/{dim}/synthetic_{dim}_{n}.npy  (normalised latents)
                 + frozen teacher checkpoint models/teacher_{dim}.pt
-  Epochs      : 1000
+  Epochs      : 500  (max; subject to early stopping)
   Batch size  : 256
   Optimizer   : AdamW  (lr=1e-4, weight_decay=1e-4)
   LR schedule : CosineAnnealingLR  (T_max=epochs, η_min=lr·0.01)
   Gradient clip: 1.0  (global norm)
   EMA decay   : 0.9999
+  Early stop  : patience=50 epochs, min_delta=1e-4  (saves best EMA state)
   Loss        : 0.5 · MSE(v_pred, v_target) + 0.5 · MSE(v_pred, v_teacher)
                   loss_flow = MSE( v_pred, x_1 − x_0 )          [flow matching]
                   loss_kd   = MSE( v_pred, teacher(x_t, t) )    [KD imitation]
