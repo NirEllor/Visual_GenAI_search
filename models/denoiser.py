@@ -144,7 +144,7 @@ class TeacherDenoiser(ConvDenoiser):
             raise ValueError("latent_dim must be divisible by 16.")
         latent_channels = latent_dim // 16
         if hidden_channels is None:
-            hidden_channels = max(256, latent_channels * 8)
+            hidden_channels = max(256, latent_channels * 16)
 
         super().__init__(
             latent_dim=latent_dim,
