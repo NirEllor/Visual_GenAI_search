@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source .venv/Scripts/activate)",
+      "Bash(pip install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(mv results/teacher_loss_*.png results/frozen_AE/)",
+      "Bash(mv results/loss_curves_*.png results/frozen_AE/)",
+      "Bash(git rm *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Nir\\\\PycharmProjects\\\\Guided_Research\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName)"
+    ]
+  }
+}
