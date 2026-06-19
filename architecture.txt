@@ -119,13 +119,13 @@ Full forward pass
 
 Teacher (step 2)
   n_blocks       : 8
-  hidden_channels: max(256, latent_channels × 8)   [scales with latent_dim]
-  e.g. dim=64  → C=4,   hidden=256
-       dim=128 → C=8,   hidden=256
-       dim=256 → C=16,  hidden=256
-       dim=384 → C=24,  hidden=256
-       dim=512 → C=32,  hidden=256 (tie)
-       dim=1024→ C=64,  hidden=512
+  hidden_channels: max(512, latent_channels × 16)   [scales with latent_dim]
+  e.g. dim=64  → C=4,   hidden=512
+       dim=128 → C=8,   hidden=512
+       dim=256 → C=16,  hidden=512
+       dim=384 → C=24,  hidden=512
+       dim=512 → C=32,  hidden=512
+       dim=1024→ C=64,  hidden=1024
 
 Student (step 3b)
   n_blocks       : 4
@@ -183,9 +183,9 @@ Latent normalisation
 ────────────────────────────────────────────────────────────────────────────────
 
   Source model  : teacher EMA weights
-  Sampling      : Euler ODE, 50 steps, batch=2048
+  Sampling      : Euler ODE, 200 steps, batch=2048
   Dataset sizes : 50k, 100k, 150k, 200k samples per dim (float32 memmap)
-  Trajectory    : 50k × 51 frames × dim  (float16 memmap)  — for analysis
+  Trajectory    : 50k × 201 frames × dim  (float16 memmap)  — for analysis
   Output        : synthetic/{dim}/synthetic_{dim}_{n}.npy
                   synthetic/{dim}/trajectories_{dim}.npy
 
