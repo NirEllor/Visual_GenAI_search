@@ -92,21 +92,16 @@ for epoch in range(EPOCHS):
 model.eval()
 
 with torch.no_grad():
-
     z = torch.randn(10000, DIM, device=DEVICE)
 
-    dt = 1.0 / 200
+    steps = 200
+    dt = 1.0 / steps
 
-    for step in range(200):
-
-        t = torch.full(
-            (z.shape[0],),
-            step / 200,
-            device=DEVICE,
-        )
+    for step in range(steps):
+        t_val = 1.0 - step * dt
+        t = torch.full((z.shape[0],), t_val, device=DEVICE)
 
         v = model(z, t)
-
         z = z - dt * v
 
     gen = z.cpu()
