@@ -164,20 +164,6 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     ema_student = create_ema(student, device)
     print(f"  Student params   : {param_count(student)}")
 
-    teacher_ckpt = MODEL_DIR / f"teacher_{dim}.pt"
-    if not teacher_ckpt.exists():
-        print(f"  [ERROR] {teacher_ckpt} not found — run step2 first.")
-        return
-
-    teacher = load_teacher(
-        str(teacher_ckpt),
-        latent_dim=dim,
-        device=device,
-    )
-
-    teacher.eval()
-    for p in teacher.parameters():
-        p.requires_grad_(False)
 
     optimizer = AdamW(student.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler = CosineAnnealingLR(
@@ -203,14 +189,14 @@ def train_student(dim: int, n_samples: int, device: torch.device,
             B = x_0.shape[0]
 
             x_1 = torch.randn_like(x_0)
-            t = torch.rand(B, device=device)
+            t = torch.ones(B, device=device)
             t_ = t.view(-1, 1)
 
-            x_t = (1.0 - t_) * x_0 + t_ * x_1
+            x_t = x_1
             v_target = x_1 - x_0
 
             if not sanity_checked:
-                residual = (x_t - (1.0 - t_) * x_0 - t_ * x_1).abs().max().item()
+                residual = (x_t - x_1).abs().max().item()
                 assert residual < 1e-5, (
                     f"x_t construction inconsistency — max residual={residual:.2e}"
                 )
@@ -225,12 +211,7 @@ def train_student(dim: int, n_samples: int, device: torch.device,
 
             v_pred = student(x_t, t)
 
-            with torch.no_grad():
-                v_teacher = teacher(x_t, t)
-
-            loss_flow = F.mse_loss(v_pred, v_target)
-            loss_kd = F.mse_loss(v_pred, v_teacher)
-            loss = 0.5 * loss_flow + 0.5 * loss_kd
+            loss = F.mse_loss(v_pred, v_target)
 
             optimizer.zero_grad()
             loss.backward()
@@ -243,10 +224,7 @@ def train_student(dim: int, n_samples: int, device: torch.device,
             if (batch_idx + 1) % LOG_INTERVAL == 0:
                 avg = total_loss / (batch_idx + 1)
                 print(
-                    f"[ep {epoch:03d} step {batch_idx + 1:05d}] "
-                    f"loss={avg:.5f} "
-                    f"flow={loss_flow.item():.5f} "
-                    f"kd={loss_kd.item():.5f}",
+                    f"[ep {epoch:03d} step {batch_idx + 1:05d}] loss={avg:.5f}",
                     flush=True,
                 )
 
