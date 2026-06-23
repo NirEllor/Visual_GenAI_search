@@ -2,7 +2,7 @@
 # Shared configuration — sourced by every run_*.sh script.
 
 EMAIL="ellorwaizner.nir@mail.huji.ac.il"
-NODE_ARGS="--nodes=1 --exclude=silico-007 --nodelist=silico-015,silico-014"
+NODE_ARGS="--nodes=1 --nodelist=silico-014,silico-015"
 
 PROJECT="/cs/labs/raananf/ellorw.nir/distillation/Distillation_Research"
 IMG="/cs/labs/raananf/ellorw.nir/images/distill.sif"
