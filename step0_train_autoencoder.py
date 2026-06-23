@@ -29,7 +29,8 @@ WEIGHT_DECAY = 0
 GRAD_CLIP    = 5.0
 CKPT_DIR     = Path("checkpoints")
 LPIPS_WEIGHT = 1.0
-KL_WEIGHT    = 0.001
+MSE_WEIGHT = 1.0
+KL_WEIGHT    = 0.0
 
 
 def get_cifar10_loader(batch_size: int) -> DataLoader:
@@ -94,7 +95,8 @@ def train_one_dim(dim: int, device: torch.device) -> None:
             ).mean()
 
             kl_loss = -0.5 * (1 + logvar - mean.pow(2) - logvar.exp()).mean()
-            loss = LPIPS_WEIGHT * lpips_loss + KL_WEIGHT * kl_loss
+            pixel_loss = F.mse_loss(recon_for_loss, imgs)
+            loss = MSE_WEIGHT * pixel_loss + LPIPS_WEIGHT * lpips_loss + KL_WEIGHT * kl_loss
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)

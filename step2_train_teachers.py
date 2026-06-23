@@ -27,7 +27,7 @@ WEIGHT_DECAY = 1e-4
 GRAD_CLIP    = 1.0
 SAVE_EVERY   = 50
 EMA_DECAY    = 0.9999
-EARLY_STOP_PATIENCE = 100
+EARLY_STOP_PATIENCE = 300
 EARLY_STOP_MIN_DELTA = 1e-4
 LATENT_DIR   = "latents"
 MODEL_DIR    = "models"
@@ -170,7 +170,12 @@ def main():
 
             if epoch % SAVE_EVERY == 0:
                 interim = Path(MODEL_DIR) / f"teacher_{dim}_ep{epoch:03d}.pt"
-                torch.save({"model_state_dict": ema_model.state_dict()}, interim)
+                torch.save({
+                    "model_state_dict": ema_model.state_dict(),
+                    "latent_dim": dim,
+                    "latent_mean": torch.from_numpy(mean.astype(np.float32)),
+                    "latent_std": torch.from_numpy(std.astype(np.float32)),
+                }, interim)
 
             print(f"  epoch {epoch:03d}  avg_loss={avg_loss:.5f}  best={best_loss:.5f}")
             if epochs_without_improvement >= EARLY_STOP_PATIENCE:

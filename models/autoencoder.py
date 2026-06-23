@@ -138,7 +138,7 @@ class ConvAutoencoder(nn.Module):
         Returns:
             recon_logits, mean, logvar
         """
-        z, mean, logvar = self.encode(x, sample=True)
+        z, mean, logvar = self.encode(x, sample=False)
         recon_logits = self.decode(z)
 
         return recon_logits, mean, logvar
