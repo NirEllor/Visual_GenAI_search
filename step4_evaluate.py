@@ -108,7 +108,10 @@ def generate(dim: int, size: Optional[int]) -> None:
     all_latents, generated = [], 0
     while generated < N_SAMPLES:
         n_batch = min(512, N_SAMPLES - generated)
-        z = flow.euler_sample(model, (n_batch, dim), n_steps=euler_steps)
+        if is_teacher:
+            z = flow.euler_sample(model, (n_batch, dim), n_steps=euler_steps)
+        else:
+            z = flow.single_step_sample(model, (n_batch, dim))
         all_latents.append(z.cpu().numpy())
         generated += n_batch
 

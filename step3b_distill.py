@@ -2,14 +2,14 @@
 Step 3b — Train 24 student flow matching models on synthetic teacher datasets.
 
 For each latent dim × dataset size (6 × 4 = 24 students):
-  - Loads synthetic x_0 dataset from step3a
+  - Loads synthetic x_0 dataset from step 3a
   - Trains a StudentDenoiser with pure flow matching loss
   - x_1 and t are sampled ONCE per batch and used consistently
     for both the interpolation and the velocity target — no hidden resampling
   Saves: models/student_{dim}_{n_samples}.pt
 
 Supports --dim and --size for fine-grained parallel GPU runs.
-Skips any student checkpoint that already exists — safe to restart.
+Skip any student checkpoint that already exists — safe to restart.
 
 Usage:
     python step3b_distill.py                        # all 24 students sequentially
@@ -34,7 +34,6 @@ import matplotlib.pyplot as plt
 
 from models.denoiser import (
     StudentDenoiser,
-    load_teacher,
     param_count,
 )
 
@@ -129,9 +128,11 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         try:
             print(f"  Loading dataset into RAM ({size_gb:.2f} GB) …")
             x0_tensor = torch.from_numpy(np.array(x0_data))
-            del x0_data
             shuffle = True
             print("  Loaded. shuffle=True (random permutation each epoch)")
+
+            del x0_data
+
         except MemoryError:
             print(
                 f"  [warning] MemoryError — falling back to memmap "
@@ -190,7 +191,6 @@ def train_student(dim: int, n_samples: int, device: torch.device,
 
             x_1 = torch.randn_like(x_0)
             t = torch.ones(B, device=device)
-            t_ = t.view(-1, 1)
 
             x_t = x_1
             v_target = x_1 - x_0

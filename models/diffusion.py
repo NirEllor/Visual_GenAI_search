@@ -40,7 +40,7 @@ class FlowMatching:
         Returns
         -------
         x_t : (B, D)  interpolated sample
-        t   : (B,)    continuous time in [0, 1]
+        t   : (B),    continuous time in [0, 1]
         v   : (B, D)  target velocity = x_1 - x_0
         """
         B = x_0.shape[0]
@@ -51,7 +51,7 @@ class FlowMatching:
         v   = x_1 - x_0
         return x_t, t, v
 
-    # ── sampling ──────────────────────────────────────────────────────────────
+    # ── sampling for Teacher (Multi-step Euler) ───────────────────────────────
 
     @torch.no_grad()
     def euler_sample(
@@ -63,19 +63,7 @@ class FlowMatching:
     ):
         """
         Euler ODE integration from t=1 (noise) to t=0 (data).
-
-        Parameters
-        ----------
-        model             : velocity network  v_theta(x_t, t) -> (B, D)
-        shape             : (n_samples, latent_dim)
-        n_steps           : number of Euler steps
-        return_trajectory : if True, also return all intermediate states
-
-        Returns
-        -------
-        x    : (n_samples, latent_dim)              final samples
-        traj : (n_samples, n_steps+1, latent_dim)   only if return_trajectory=True
-               traj[:, 0] = x_1 (noise), traj[:, -1] = x_0 (data)
+        Use this for evaluating the TEACHER model.
         """
         device = self.device
         x  = torch.randn(shape, device=device)
@@ -95,3 +83,21 @@ class FlowMatching:
         if return_trajectory:
             return x, np.stack(traj, axis=1)                     # (N, n_steps+1, D)
         return x
+
+    # ── sampling for Student (1-Step Generation) ──────────────────────────────
+
+    @torch.no_grad()
+    def single_step_sample(self, model: torch.nn.Module, shape: tuple):
+        """
+        Direct 1-step generation from t=1 (noise) to t=0 (data).
+        Use this for evaluating the STUDENT models.
+        """
+        device = self.device
+        x_1 = torch.randn(shape, device=device)
+
+        t = torch.ones((shape[0],), device=device)
+
+        v = model(x_1, t)
+
+        x_0 = x_1 - v
+        return x_0

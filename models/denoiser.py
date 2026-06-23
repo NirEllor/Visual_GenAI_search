@@ -137,14 +137,14 @@ class ConvDenoiser(nn.Module):
 # ── Concrete models ───────────────────────────────────────────────────────────
 
 class TeacherDenoiser(ConvDenoiser):
-    """Large teacher: 4 conv residual blocks, hidden_channels scales with latent channels."""
+    """Large teacher: 8 conv residual blocks, hidden_channels scales with latent channels."""
 
     def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 8):
         if latent_dim % 16 != 0:
             raise ValueError("latent_dim must be divisible by 16.")
         latent_channels = latent_dim // 16
         if hidden_channels is None:
-            hidden_channels = max(512, latent_channels * 16)
+            hidden_channels = min(512, max(512, latent_channels * 16))
 
         super().__init__(
             latent_dim=latent_dim,
@@ -153,22 +153,58 @@ class TeacherDenoiser(ConvDenoiser):
         )
 
 
-class StudentDenoiser(ConvDenoiser):
-    """Student: conv residual blocks, hidden_channels scales with latent channels."""
+class StudentDenoiser(nn.Module):  # <-- שונה ל-nn.Module כדי לתקן את הירושה והבאג
+    """
+    Time-independent Student: Pure convolutional residual blocks.
+    No time embedding, no FiLM conditioning.
+    """
 
     def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 4):
+        super().__init__()
         if latent_dim % 16 != 0:
             raise ValueError("latent_dim must be divisible by 16.")
-        latent_channels = latent_dim // 16
+
+        self.latent_dim = latent_dim
+        self.latent_channels = latent_dim // 16
 
         if hidden_channels is None:
-            hidden_channels = max(128, latent_channels * 8)
+            self.hidden_channels = max(128, self.latent_channels * 8)
+        else:
+            self.hidden_channels = hidden_channels
 
-        super().__init__(
-            latent_dim=latent_dim,
-            hidden_channels=hidden_channels,
-            n_blocks=n_blocks,
+        self.n_blocks = n_blocks
+
+        # Input projection
+        self.input_proj = nn.Conv2d(self.latent_channels, self.hidden_channels, kernel_size=1)
+
+        # Pure residual blocks (No time conditioning!)
+        self.blocks = nn.ModuleList([
+            nn.Sequential(
+                nn.GroupNorm(min(32, self.hidden_channels), self.hidden_channels),
+                nn.Conv2d(self.hidden_channels, self.hidden_channels, kernel_size=3, padding=1),
+                nn.GELU(),
+                nn.GroupNorm(min(32, self.hidden_channels), self.hidden_channels),
+                nn.Conv2d(self.hidden_channels, self.hidden_channels, kernel_size=3, padding=1)
+            ) for _ in range(self.n_blocks)
+        ])
+
+        # Output projection
+        self.output_head = nn.Sequential(
+            nn.GroupNorm(min(32, self.hidden_channels), self.hidden_channels),
+            nn.Conv2d(hidden_channels, self.latent_channels, kernel_size=1),
         )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # t parameter is kept only for interface compatibility
+        h = x.view(-1, self.latent_channels, 4, 4)
+        h = self.input_proj(h)
+
+        for block in self.blocks:
+            h = h + block(h)  # Classic residual connection
+
+        return self.output_head(h).flatten(1)
+
+
 # ── I/O helpers ───────────────────────────────────────────────────────────────
 
 def load_teacher(ckpt_path: str, latent_dim: int, device: str = "cpu") -> TeacherDenoiser:

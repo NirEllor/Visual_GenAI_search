@@ -32,7 +32,7 @@ LATENT_DIMS     = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES   = [50_000, 100_000, 150_000, 200_000]
 TRAJ_SAMPLES    = 50_000    # trajectory dataset size (storage-bounded)
 EULER_STEPS     = 200
-GEN_BATCH       = 2_048
+GEN_BATCH       = 1_024
 MODEL_DIR       = Path("models")
 SYNTHETIC_DIR   = Path("synthetic")
 
@@ -130,7 +130,7 @@ def generate_for_dim(dim: int, device: torch.device) -> None:
         print(f"  Generating dataset  n={n:,} …")
         generate_dataset(model, flow, dim, n, out_path)
 
-    # ── trajectory dataset (250k only, float16) ───────────────────────────────
+    # ── trajectory dataset (50k only, float16) ───────────────────────────────
     traj_path = dim_dir / f"trajectories_{dim}.npy"
     if traj_path.exists():
         print(f"  [skip] {traj_path.name} already exists.")
