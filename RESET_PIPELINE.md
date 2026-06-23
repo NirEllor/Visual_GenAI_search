@@ -42,6 +42,18 @@ rm -f results/trained_AE/fid_vs_size.png
 
 # Utility plots (plot_losses.py) — optional
 rm -f results/trained_AE/losses_*.png
+
+# analyze_teacher_sampling.py — teacher sampling statistics
+rm -rf results/teacher_sampling_analysis/
+
+# visualize_latents.py — real vs teacher / teacher vs student / real vs student TSNE + PCA
+rm -rf results/teacher_latent_analysis/
+
+# analyze_student_latents.py — student latent distribution analysis
+rm -rf results/student_latent_analysis/
+
+# gaussian_baseline_decode.py — Gaussian baseline FID reference
+rm -rf results/gaussian_baseline/
 ```
 
 ---
@@ -169,7 +181,6 @@ rm -f results/trained_AE/fid_vs_size.png
 |---|---|
 | `checkpoints/ae_{dim}.pt` | step 0 |
 | `results/ae_eval/` | step 0b |
-| `results/trained_AE/losses_{dim}.png` | `plot_losses.py` (utility) |
 | `latents/latents_{dim}.npy` | step 1 |
 | `latents/latents_{dim}_norm_stats.npy` | step 2 |
 | `models/teacher_{dim}.pt` | step 2 |
@@ -186,6 +197,13 @@ rm -f results/trained_AE/fid_vs_size.png
 | `results/trained_AE/metrics_all.json` | step 4 `--plot` |
 | `results/trained_AE/fid_vs_dim.png` | step 4 `--plot` |
 | `results/trained_AE/fid_vs_size.png` | step 4 `--plot` |
+| `results/trained_AE/losses_{dim}.png` | `plot_losses.py` (utility) |
+| `results/teacher_sampling_analysis/teacher_sampling_dim_{dim}.json` | `analyze_teacher_sampling.py` (utility) |
+| `results/teacher_latent_analysis/` | `visualize_latents.py` (utility) |
+| `results/student_latent_analysis/` | `analyze_student_latents.py` (utility) |
+| `results/gaussian_baseline/` | `gaussian_baseline_decode.py` (utility) |
+
+Utility scripts with **no file output** (stdout only): `dry_run.py`, `sanity_flow.py`.
 
 `{tag}` is either `teacher` or the dataset size (e.g. `50000`, `200000`).
 `[0-9]*` in the globs matches the numeric size tags only, leaving `_teacher` files untouched.

@@ -9,6 +9,7 @@ from sklearn.decomposition import PCA
 
 
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
+DATASET_SIZES = [50_000, 100_000, 150_000, 200_000]
 
 LATENT_DIR = Path("latents")
 RESULTS_DIR = Path("results/trained_AE")
@@ -27,6 +28,13 @@ def load_teacher_latents(dim: int) -> np.ndarray:
         raise FileNotFoundError(
             f"{path} not found. Run Step 4 --generate --teacher for dim={dim} first."
         )
+    return np.load(path).astype(np.float32)
+
+
+def load_student_latents(dim: int, size: int) -> np.ndarray | None:
+    path = RESULTS_DIR / f"z_orig_{dim}_{size}.npy"
+    if not path.exists():
+        return None
     return np.load(path).astype(np.float32)
 
 
@@ -122,17 +130,31 @@ def mmd_rbf(real: np.ndarray, gen: np.ndarray, max_n: int = 3000, seed: int = 0)
 
 from sklearn.manifold import TSNE
 
-def plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=2000, seed=0):
+
+def _size_label(size: int) -> str:
+    return f"{size // 1_000_000}M" if size >= 1_000_000 else f"{size // 1_000}k"
+
+
+def plot_2d_comparison(
+    X_a: np.ndarray,
+    X_b: np.ndarray,
+    label_a: str,
+    label_b: str,
+    title: str,
+    out_name: str,
+    method: str = "tsne",
+    n: int = 2000,
+    seed: int = 0,
+):
     rng = np.random.default_rng(seed)
-    n = min(n, len(real), len(gen))
+    n = min(n, len(X_a), len(X_b))
 
-    real_s = real[rng.choice(len(real), size=n, replace=False)]
-    gen_s = gen[rng.choice(len(gen), size=n, replace=False)]
+    a_s = X_a[rng.choice(len(X_a), size=n, replace=False)]
+    b_s = X_b[rng.choice(len(X_b), size=n, replace=False)]
 
-    X = np.concatenate([real_s, gen_s], axis=0)
+    X = np.concatenate([a_s, b_s], axis=0)
     y = np.array([0] * n + [1] * n)
-
-    X = (X - real_s.mean(axis=0, keepdims=True)) / (real_s.std(axis=0, keepdims=True) + 1e-8)
+    X = (X - a_s.mean(axis=0, keepdims=True)) / (a_s.std(axis=0, keepdims=True) + 1e-8)
 
     if method == "tsne":
         xy = TSNE(
@@ -143,7 +165,6 @@ def plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=2000, seed=0):
             init="pca",
             learning_rate="auto",
         ).fit_transform(X)
-
     elif method == "umap":
         import umap
         xy = umap.UMAP(
@@ -152,20 +173,60 @@ def plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=2000, seed=0):
             min_dist=0.1,
             random_state=seed,
         ).fit_transform(X)
-
     else:
         raise ValueError(method)
 
     plt.figure(figsize=(7, 6))
-    plt.scatter(xy[y == 0, 0], xy[y == 0, 1], s=5, alpha=0.45, label="real CIFAR latents")
-    plt.scatter(xy[y == 1, 0], xy[y == 1, 1], s=5, alpha=0.45, label="teacher latents")
-    plt.title(f"{method.upper()} real vs teacher — dim={dim}")
+    plt.scatter(xy[y == 0, 0], xy[y == 0, 1], s=5, alpha=0.45, label=label_a)
+    plt.scatter(xy[y == 1, 0], xy[y == 1, 1], s=5, alpha=0.45, label=label_b)
+    plt.title(title)
     plt.xticks([])
     plt.yticks([])
     plt.legend()
     plt.tight_layout()
-    plt.savefig(OUT_DIR / f"{method}_real_vs_teacher_dim_{dim}.png", dpi=150)
+    plt.savefig(OUT_DIR / out_name, dpi=150)
     plt.close()
+
+
+def plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=2000, seed=0):
+    plot_2d_comparison(
+        real, gen,
+        label_a="real CIFAR latents",
+        label_b="teacher latents",
+        title=f"{method.upper()} real vs teacher — dim={dim}",
+        out_name=f"{method}_real_vs_teacher_dim_{dim}.png",
+        method=method,
+        n=n,
+        seed=seed,
+    )
+
+
+def plot_2d_teacher_vs_student(dim, teacher, student, size, method="tsne", n=2000, seed=0):
+    lbl = _size_label(size)
+    plot_2d_comparison(
+        teacher, student,
+        label_a="teacher latents",
+        label_b=f"student latents ({lbl})",
+        title=f"{method.upper()} teacher vs student ({lbl}) — dim={dim}",
+        out_name=f"{method}_teacher_vs_student_{size}_dim_{dim}.png",
+        method=method,
+        n=n,
+        seed=seed,
+    )
+
+
+def plot_2d_real_vs_student(dim, real, student, size, method="tsne", n=2000, seed=0):
+    lbl = _size_label(size)
+    plot_2d_comparison(
+        real, student,
+        label_a="real CIFAR latents",
+        label_b=f"student latents ({lbl})",
+        title=f"{method.upper()} real vs student ({lbl}) — dim={dim}",
+        out_name=f"{method}_real_vs_student_{size}_dim_{dim}.png",
+        method=method,
+        n=n,
+        seed=seed,
+    )
 
 
 def plot_norm_hist(dim: int, real: np.ndarray, gen: np.ndarray):
@@ -206,6 +267,7 @@ def main():
     parser.add_argument("--method", choices=["pca", "tsne", "umap", "all"], default="all")
     parser.add_argument("--n-samples", type=int, default=3000)
     parser.add_argument("--dims", type=int, nargs="+", default=LATENT_DIMS)
+    parser.add_argument("--sizes", type=int, nargs="+", default=DATASET_SIZES)
     args = parser.parse_args()
 
     summary = {}
@@ -233,14 +295,44 @@ def main():
             plot_norm_hist(dim, real, gen)
             plot_pca_spectrum(dim, spec)
 
-        if args.method in ["tsne", "all"]:
+        do_tsne = args.method in ["tsne", "all"]
+        do_umap = args.method in ["umap", "all"]
+
+        # ── real vs teacher ───────────────────────────────────────────────────
+        if do_tsne:
+            print(f"  TSNE real vs teacher dim={dim} ...")
             plot_2d_real_vs_teacher(dim, real, gen, method="tsne", n=args.n_samples)
 
-        if args.method in ["umap", "all"]:
+        if do_umap:
             try:
+                print(f"  UMAP real vs teacher dim={dim} ...")
                 plot_2d_real_vs_teacher(dim, real, gen, method="umap", n=args.n_samples)
             except ModuleNotFoundError:
                 print("  [warning] umap-learn not installed — skipping UMAP.")
+
+        # ── teacher vs student  /  real vs student (per size) ─────────────────
+        for size in args.sizes:
+            student = load_student_latents(dim, size)
+            if student is None:
+                print(f"  [skip] student size={size} not found for dim={dim}")
+                continue
+
+            lbl = _size_label(size)
+
+            if do_tsne:
+                print(f"  TSNE teacher vs student ({lbl}) dim={dim} ...")
+                plot_2d_teacher_vs_student(dim, gen, student, size, method="tsne", n=args.n_samples)
+                print(f"  TSNE real vs student ({lbl}) dim={dim} ...")
+                plot_2d_real_vs_student(dim, real, student, size, method="tsne", n=args.n_samples)
+
+            if do_umap:
+                try:
+                    print(f"  UMAP teacher vs student ({lbl}) dim={dim} ...")
+                    plot_2d_teacher_vs_student(dim, gen, student, size, method="umap", n=args.n_samples)
+                    print(f"  UMAP real vs student ({lbl}) dim={dim} ...")
+                    plot_2d_real_vs_student(dim, real, student, size, method="umap", n=args.n_samples)
+                except ModuleNotFoundError:
+                    print("  [warning] umap-learn not installed — skipping UMAP.")
 
     out_json = OUT_DIR / "teacher_latent_distribution_summary.json"
     with open(out_json, "w") as f:
