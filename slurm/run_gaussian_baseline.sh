@@ -15,7 +15,7 @@ DEP_FLAG=""
 IDS=()
 
 for DIM in 128 256 512 1024; do
-  JOB=$(sbatch $DEP_FLAG \
+  JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
     --mem=30G \
     -c2 \
     --time=04:00:00 \

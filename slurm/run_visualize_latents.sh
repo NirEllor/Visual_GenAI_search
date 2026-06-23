@@ -23,7 +23,7 @@ if [ ${#DIMS[@]} -eq 0 ]; then
   DIMS=(64 128 256 384 512 1024)
 fi
 
-JOB=$(sbatch $DEP_FLAG \
+JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
   --mem=100G \
   -c4 \
   --time=03:00:00 \

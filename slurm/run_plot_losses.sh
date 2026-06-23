@@ -13,7 +13,7 @@ cd "$(dirname "$SCRIPT_DIR")"
 DEP_FLAG=""
 [ -n "${1:-}" ] && DEP_FLAG="--dependency=$1"
 
-JOB=$(sbatch $DEP_FLAG \
+JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
   --mem=8G -c1 --time=0-01 --gres=gpu:0 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=plot_losses \

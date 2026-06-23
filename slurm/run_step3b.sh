@@ -16,7 +16,7 @@ DEP_FLAG=""
 IDS=()
 for DIM in "${DIMS[@]}"; do
   for SIZE in "${SIZES[@]}"; do
-    JOB=$(sbatch $DEP_FLAG \
+    JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
       --mem=30G -c2 --time=2-00 --gres=gpu:1 \
       --mail-type=ALL --mail-user="$EMAIL" \
       --job-name=step3b_stu_d${DIM}_n${SIZE} \

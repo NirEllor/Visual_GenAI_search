@@ -14,7 +14,7 @@ DEP_FLAG=""
 
 EVAL_IDS=()
 for DIM in "${DIMS[@]}"; do
-  JOB=$(sbatch $DEP_FLAG \
+  JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
     --mem=30G -c2 --time=0-04 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step0b_eval_d${DIM} \
@@ -26,7 +26,7 @@ done
 
 EVAL_DEP="afterok:$(IFS=:; echo "${EVAL_IDS[*]}")"
 
-JOB_PLOT=$(sbatch --dependency="$EVAL_DEP" \
+JOB_PLOT=$(sbatch --dependency="$EVAL_DEP" $NODE_ARGS \
   --mem=8G -c1 --time=0-01 --gres=gpu:0 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=step0b_plot \

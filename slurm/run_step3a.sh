@@ -14,7 +14,7 @@ DEP_FLAG=""
 
 IDS=()
 for DIM in "${DIMS[@]}"; do
-  JOB=$(sbatch $DEP_FLAG \
+  JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
     --mem=40G -c2 --time=1-00 --gres=gpu:1 \
     --mail-type=ALL --mail-user="$EMAIL" \
     --job-name=step3a_gen_d${DIM} \

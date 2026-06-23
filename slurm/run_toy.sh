@@ -12,7 +12,7 @@ cd "$(dirname "$SCRIPT_DIR")"
 DEP_FLAG=""
 [ -n "${1:-}" ] && DEP_FLAG="--dependency=$1"
 
-JOB=$(sbatch $DEP_FLAG \
+JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
   --mem=30G \
   -c2 \
   --time=08:00:00 \

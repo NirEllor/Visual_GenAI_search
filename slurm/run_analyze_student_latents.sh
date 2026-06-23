@@ -35,7 +35,7 @@ fi
 
 SIZES=(50000 100000 150000 200000)
 
-JOB=$(sbatch $DEP_FLAG \
+JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
   --mem=100G \
   -c4 \
   --time=03:00:00 \

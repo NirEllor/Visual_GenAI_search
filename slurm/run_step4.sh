@@ -18,7 +18,7 @@ GEN_IDS=()
 
 for DIM in "${DIMS[@]}"; do
   for SIZE in "${SIZES[@]}"; do
-    JOB=$(sbatch $DEP_FLAG \
+    JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
       --mem=30G -c2 --time=2:00:00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_gen_d${DIM}_n${SIZE} \
@@ -27,7 +27,7 @@ for DIM in "${DIMS[@]}"; do
     GEN_IDS+=($JOB)
   done
 
-  JOB=$(sbatch $DEP_FLAG \
+  JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
     --mem=30G -c2 --time=2:00:00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_gen_tea_d${DIM} \
@@ -45,7 +45,7 @@ DEC_IDS=()
 
 for DIM in "${DIMS[@]}"; do
   for SIZE in "${SIZES[@]}"; do
-    JOB=$(sbatch --dependency="$GEN_DEP" \
+    JOB=$(sbatch --dependency="$GEN_DEP" $NODE_ARGS \
       --mem=30G -c2 --time=2:00:00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_dec_d${DIM}_n${SIZE} \
@@ -54,7 +54,7 @@ for DIM in "${DIMS[@]}"; do
     DEC_IDS+=($JOB)
   done
 
-  JOB=$(sbatch --dependency="$GEN_DEP" \
+  JOB=$(sbatch --dependency="$GEN_DEP" $NODE_ARGS \
     --mem=30G -c2 --time=2:00:00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_dec_tea_d${DIM} \
@@ -72,7 +72,7 @@ MET_IDS=()
 
 for DIM in "${DIMS[@]}"; do
   for SIZE in "${SIZES[@]}"; do
-    JOB=$(sbatch --dependency="$DEC_DEP" \
+    JOB=$(sbatch --dependency="$DEC_DEP" $NODE_ARGS \
       --mem=40G -c2 --time=2:00:00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_met_d${DIM}_n${SIZE} \
@@ -81,7 +81,7 @@ for DIM in "${DIMS[@]}"; do
     MET_IDS+=($JOB)
   done
 
-  JOB=$(sbatch --dependency="$DEC_DEP" \
+  JOB=$(sbatch --dependency="$DEC_DEP" $NODE_ARGS \
     --mem=40G -c2 --time=2:00:00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_met_tea_d${DIM} \
@@ -94,7 +94,7 @@ echo "  metrics job IDs: ${MET_IDS[*]}"
 MET_DEP="afterok:$(IFS=:; echo "${MET_IDS[*]}")"
 
 # ── Phase 4: aggregate + plot (1 CPU job) ────────────────────────────────────────
-JOB_PLOT=$(sbatch --dependency="$MET_DEP" \
+JOB_PLOT=$(sbatch --dependency="$MET_DEP" $NODE_ARGS \
   --mem=8G -c1 --time=2:00:00 --gres=gpu:0 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=step4_plot \
