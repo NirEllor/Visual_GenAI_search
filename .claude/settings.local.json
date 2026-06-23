@@ -10,7 +10,9 @@
       "Bash(mv results/loss_curves_*.png results/frozen_AE/)",
       "Bash(git rm *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Nir\\\\PycharmProjects\\\\Guided_Research\" -Recurse -Depth 2)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "PowerShell(git add *)",
+      "PowerShell(git push *)"
     ]
   }
 }

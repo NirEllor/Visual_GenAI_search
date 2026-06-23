@@ -139,7 +139,7 @@ class ConvDenoiser(nn.Module):
 class TeacherDenoiser(ConvDenoiser):
     """Large teacher: 8 conv residual blocks, hidden_channels scales with latent channels."""
 
-    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 8):
+    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 4):
         if latent_dim % 16 != 0:
             raise ValueError("latent_dim must be divisible by 16.")
         latent_channels = latent_dim // 16
@@ -159,7 +159,7 @@ class StudentDenoiser(nn.Module):  # <-- שונה ל-nn.Module כדי לתקן �
     No time embedding, no FiLM conditioning.
     """
 
-    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 4):
+    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 2):
         super().__init__()
         if latent_dim % 16 != 0:
             raise ValueError("latent_dim must be divisible by 16.")
