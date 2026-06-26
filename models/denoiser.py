@@ -168,7 +168,7 @@ class StudentDenoiser(nn.Module):
         self.latent_channels = latent_dim // 16
 
         if hidden_channels is None:
-            self.hidden_channels = max(128, self.latent_channels * 8)
+            self.hidden_channels = max(256, self.latent_channels * 8)
         else:
             self.hidden_channels = hidden_channels
 
@@ -194,7 +194,7 @@ class StudentDenoiser(nn.Module):
             nn.Conv2d(self.hidden_channels, self.latent_channels, kernel_size=1),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor = None) -> torch.Tensor:
         # t parameter is kept only for interface compatibility
         h = x.view(-1, self.latent_channels, 4, 4)
         h = self.input_proj(h)
