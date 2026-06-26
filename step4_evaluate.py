@@ -88,28 +88,28 @@ def generate(dim: int, size: Optional[int]) -> None:
             print(f"[generate] [ERROR] {ckpt_path} not found — run step2 first.")
             return
         print(f"[generate] dim={dim}  model=teacher  device={device}")
-        model       = load_teacher(str(ckpt_path), latent_dim=dim, device=device)
-        euler_steps = EULER_STEPS
+        model = load_teacher(str(ckpt_path), latent_dim=dim, device=device)
+        print(f"  Generating {N_SAMPLES:,} samples with Euler-{EULER_STEPS} …")
     else:
         ckpt_path = MODEL_DIR / f"student_{dim}_{size}.pt"
         if not ckpt_path.exists():
             print(f"[generate] [ERROR] {ckpt_path} not found — run step3b first.")
             return
         print(f"[generate] dim={dim}  size={_label(size)}  device={device}")
-        model       = load_student(str(ckpt_path), latent_dim=dim, device=device)
-        euler_steps = EULER_STEPS
+        model = load_student(str(ckpt_path), latent_dim=dim, device=device)
+        print(f"  Generating {N_SAMPLES:,} samples with 1-Step Generation …")
 
+    # טעינת הסטטיסטיקות הנכונות מתוך הקובץ של המודל הרלוונטי
     ckpt     = torch.load(str(ckpt_path), map_location="cpu", weights_only=True)
     lat_mean = ckpt["latent_mean"].cpu().numpy()
-    lat_std = ckpt["latent_std"].cpu().numpy()
+    lat_std  = ckpt["latent_std"].cpu().numpy()
     flow     = FlowMatching(device=device)
 
-    print(f"  Generating {N_SAMPLES:,} samples with Euler-{euler_steps} …")
     all_latents, generated = [], 0
     while generated < N_SAMPLES:
         n_batch = min(512, N_SAMPLES - generated)
         if is_teacher:
-            z = flow.euler_sample(model, (n_batch, dim), n_steps=euler_steps)
+            z = flow.euler_sample(model, (n_batch, dim), n_steps=EULER_STEPS)
         else:
             z = flow.single_step_sample(model, (n_batch, dim))
         all_latents.append(z.cpu().numpy())
@@ -120,7 +120,6 @@ def generate(dim: int, size: Optional[int]) -> None:
     print(f"  Latent range: [{z_orig.min():.3f}, {z_orig.max():.3f}]")
     np.save(str(out), z_orig)
     print(f"  Saved → {out}")
-
 
 # ── phase 2: decode latents → images ─────────────────────────────────────────
 
