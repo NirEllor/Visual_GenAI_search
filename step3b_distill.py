@@ -117,7 +117,7 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     # קובץ הטרז'קטוריות מכיל 50,000 דוגמאות קבועות
     # צורת המטריצה: (TRAJ_SAMPLES, EULER_STEPS + 1, dim)
     n_frames = 201  # EULER_STEPS + 1
-    total_traj_samples = 50_000
+    total_traj_samples = 200_000
 
     print(f"\n  dim={dim}  n_samples={n_samples:,} (Clamped to {total_traj_samples:,} traj data)  device={device}")
 
