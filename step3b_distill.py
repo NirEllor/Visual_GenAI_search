@@ -165,7 +165,6 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     ema_student = create_ema(student, device)
     print(f"  Student params   : {param_count(student)}")
 
-
     optimizer = AdamW(student.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler = CosineAnnealingLR(
         optimizer,
@@ -190,7 +189,6 @@ def train_student(dim: int, n_samples: int, device: torch.device,
             B = x_0.shape[0]
 
             x_1 = torch.randn_like(x_0)
-            t = torch.ones(B, device=device)
 
             x_t = x_1
             v_target = x_1 - x_0
@@ -209,7 +207,8 @@ def train_student(dim: int, n_samples: int, device: torch.device,
                 )
                 sanity_checked = True
 
-            v_pred = student(x_t, t)
+            # המתנה הוסרה מכאן בהתאם לארכיטקטורה ה-Time-Independent החדשה של הסטודנט
+            v_pred = student(x_t)
 
             loss = F.mse_loss(v_pred, v_target)
 

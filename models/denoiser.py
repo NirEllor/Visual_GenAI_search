@@ -153,7 +153,7 @@ class TeacherDenoiser(ConvDenoiser):
         )
 
 
-class StudentDenoiser(nn.Module):  # <-- שונה ל-nn.Module כדי לתקן את הירושה והבאג
+class StudentDenoiser(nn.Module):
     """
     Time-independent Student: Pure convolutional residual blocks.
     No time embedding, no FiLM conditioning.
@@ -191,7 +191,7 @@ class StudentDenoiser(nn.Module):  # <-- שונה ל-nn.Module כדי לתקן �
         # Output projection
         self.output_head = nn.Sequential(
             nn.GroupNorm(min(32, self.hidden_channels), self.hidden_channels),
-            nn.Conv2d(hidden_channels, self.latent_channels, kernel_size=1),
+            nn.Conv2d(self.hidden_channels, self.latent_channels, kernel_size=1),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
