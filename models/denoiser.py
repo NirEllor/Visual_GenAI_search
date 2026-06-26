@@ -159,7 +159,7 @@ class StudentDenoiser(nn.Module):
     No time embedding, no FiLM conditioning.
     """
 
-    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 2):
+    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 4):
         super().__init__()
         if latent_dim % 16 != 0:
             raise ValueError("latent_dim must be divisible by 16.")
