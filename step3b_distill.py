@@ -99,7 +99,8 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         print(f"  [skip] {out_path.name} already exists.")
         return
 
-    data_path = SYNTHETIC_DIR / str(dim) / f"synthetic_{dim}_{n_samples}.npy"
+    # 🚨 שינוי: טוענים את קובץ המסלולים המלא של המורה
+    data_path = SYNTHETIC_DIR / str(dim) / f"trajectories_{dim}.npy"
     if not data_path.exists():
         print(f"  [ERROR] {data_path} not found — run step3a first.")
         return
@@ -113,43 +114,38 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     lat_mean = stats[0].astype(np.float32)
     lat_std = stats[1].astype(np.float32)
 
-    size_gb = n_samples * dim * 4 / 1e9
-    print(f"\n  dim={dim}  n={n_samples:,}  device={device}")
-    print(f"  Dataset size: {size_gb:.2f} GB")
+    # קובץ הטרז'קטוריות מכיל 50,000 דוגמאות קבועות
+    # צורת המטריצה: (TRAJ_SAMPLES, EULER_STEPS + 1, dim)
+    n_frames = 201  # EULER_STEPS + 1
+    total_traj_samples = 50_000
 
-    x0_data = np.memmap(
+    print(f"\n  dim={dim}  n_samples={n_samples:,} (Clamped to {total_traj_samples:,} traj data)  device={device}")
+
+    # טעינת ה-memmap של המסלולים
+    traj_data = np.memmap(
         str(data_path),
-        dtype="float32",
+        dtype="float16",
         mode="r",
-        shape=(n_samples, dim)
+        shape=(total_traj_samples, n_frames, dim)
     )
 
-    if load_to_ram:
-        try:
-            print(f"  Loading dataset into RAM ({size_gb:.2f} GB) …")
-            x0_tensor = torch.from_numpy(np.array(x0_data))
-            shuffle = True
-            print("  Loaded. shuffle=True (random permutation each epoch)")
+    # 🚨 שליפת נקודות הקצה המזווגות של המורה (float32 לאימון)
+    # אינדקס 0 הוא הרעש ההתחלתי (x_1), אינדקס 1- הוא התמונה הסופית (x_0)
+    print("  Extracting paired endpoints from teacher trajectories...")
+    x1_paired = np.array(traj_data[:n_samples, 0, :], dtype=np.float32)  # noise
+    x0_paired = np.array(traj_data[:n_samples, -1, :], dtype=np.float32)  # final data
 
-            del x0_data
+    del traj_data  # שחרור ה-memmap מהזיכרון
 
-        except MemoryError:
-            print(
-                f"  [warning] MemoryError — falling back to memmap "
-                f"(file-backed, shuffle=True via random index access, slower on HDD)"
-            )
-            x0_tensor = torch.from_numpy(x0_data)
-            shuffle = True
-    else:
-        print("  Using memmap (file-backed). shuffle=True via random index access.")
-        x0_tensor = torch.from_numpy(x0_data)
-        shuffle = True
+    x1_tensor = torch.from_numpy(x1_paired)
+    x0_tensor = torch.from_numpy(x0_paired)
 
-    dataset = TensorDataset(x0_tensor)
+    # 🚨 יצירת דאטאסט המכיל את שני הוקטורים המזווגים יחד!
+    dataset = TensorDataset(x1_tensor, x0_tensor)
     loader = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
-        shuffle=shuffle,
+        shuffle=True,  # Shuffle משאיר את הזיווג בין x_1 ל-x_0 בתוך ה-Batch
         num_workers=2,
         pin_memory=True,
     )
@@ -178,36 +174,20 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     epochs_without_improvement = 0
 
     history = []
-    sanity_checked = False
 
     for epoch in tqdm(range(1, EPOCHS + 1), desc=f"    dim={dim} n={n_samples:,}"):
         student.train()
         total_loss = 0.0
 
-        for batch_idx, (x_0,) in enumerate(loader):
+        # 🚨 הלולאה מקבלת כעת את הרעש המקורי והיעד המקורי ביחד
+        for batch_idx, (x_1, x_0) in enumerate(loader):
+            x_1 = x_1.to(device)
             x_0 = x_0.to(device)
-            B = x_0.shape[0]
 
-            x_1 = torch.randn_like(x_0)
-
+            # הסטודנט מקבל את נקודת הרעש x_1 ומנחש את המהירות ליעד
             x_t = x_1
             v_target = x_1 - x_0
 
-            if not sanity_checked:
-                residual = (x_t - x_1).abs().max().item()
-                assert residual < 1e-5, (
-                    f"x_t construction inconsistency — max residual={residual:.2e}"
-                )
-                assert torch.allclose(v_target, x_1 - x_0, atol=1e-6), (
-                    "v_target does not equal x_1 - x_0 from the same x_1"
-                )
-                print(
-                    f"  [sanity] x_t/v_target consistency check passed "
-                    f"(max residual={residual:.2e})"
-                )
-                sanity_checked = True
-
-            # המתנה הוסרה מכאן בהתאם לארכיטקטורה ה-Time-Independent החדשה של הסטודנט
             v_pred = student(x_t)
 
             loss = F.mse_loss(v_pred, v_target)
