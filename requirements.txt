@@ -4,16 +4,18 @@ torch==2.4.1
 torchvision==0.19.1
 
 # Numerics & utilities
-numpy
-tqdm
-matplotlib
-Pillow
-scikit-learn
+numpy~=2.4.4
+tqdm~=4.67.3
+matplotlib~=3.10.9
+Pillow~=12.2.0
+scikit-learn~=1.8.0
 
 # Metrics (optional — used with try/except fallback)
 clean-fid
 torch_fidelity
-lpips
+lpips~=0.1.4
 
 # Optional visualisation
 # umap-learn  # pip install umap-learn  (enables --method umap in visualize_latents.py)
+
+diffusers~=0.38.0

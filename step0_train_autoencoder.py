@@ -24,12 +24,12 @@ import torch.nn.functional as F
 LATENT_DIMS  = [64, 128, 256, 384, 512, 1024]
 EPOCHS       = 1000
 BATCH_SIZE   = 128
-LR           = 2e-3
-WEIGHT_DECAY = 0
+LR           = 1e-4
+WEIGHT_DECAY = 1e-4
 GRAD_CLIP    = 5.0
 CKPT_DIR     = Path("checkpoints")
 LPIPS_WEIGHT = 1.0
-MSE_WEIGHT = 1.0
+MSE_WEIGHT = 0.0
 KL_WEIGHT    = 0.0
 
 
@@ -55,7 +55,7 @@ def train_one_dim(dim: int, device: torch.device) -> None:
     opt      = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched    = CosineAnnealingLR(opt, T_max=EPOCHS)
     lpips_fn = lpips.LPIPS(net='vgg').to(device)
-    lpips_fn.eval()  # frozen AlexNet backbone — only AE weights train
+    lpips_fn.eval()  # frozen VGG  backbone — only AE weights train
     for p in lpips_fn.parameters():
         p.requires_grad = False
 

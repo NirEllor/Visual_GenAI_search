@@ -99,7 +99,6 @@ def generate(dim: int, size: Optional[int]) -> None:
         model = load_student(str(ckpt_path), latent_dim=dim, device=device)
         print(f"  Generating {N_SAMPLES:,} samples with 1-Step Generation …")
 
-    # טעינת הסטטיסטיקות הנכונות מתוך הקובץ של המודל הרלוונטי
     ckpt     = torch.load(str(ckpt_path), map_location="cpu", weights_only=True)
     lat_mean = ckpt["latent_mean"].cpu().numpy()
     lat_std  = ckpt["latent_std"].cpu().numpy()
@@ -181,9 +180,13 @@ def decode(dim: int, size: Optional[int]) -> None:
 
     # ── AE reconstruction (shared per dim, computed once) ─────────────────────
     aedir = ae_recon_dir(dim)
+    print("  Encoding CIFAR-10 test set for AE-FID …")
+
     if aedir.exists():
-        print(f"  AE recon already exists at {aedir}/ — skipping.")
-        return
+        import shutil
+        shutil.rmtree(aedir)
+
+    aedir.mkdir(parents=True, exist_ok=True)
 
     print("  Encoding CIFAR-10 test set for AE-FID …")
     tf      = transforms.ToTensor()

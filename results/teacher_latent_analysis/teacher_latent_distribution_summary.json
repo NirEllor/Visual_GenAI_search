@@ -4,7 +4,7 @@
       "mean_l2": 0.7003953456878662,
       "mean_l2_per_sqrt_dim": 0.08754941821098328,
       "mean_abs_log_std_diff": 0.07614736258983612,
-      "median_std_ratio_gen_over_real": 0.9258858561515808,
+      "median_std_rati  o_gen_over_real": 0.9258858561515808,
       "p10_std_ratio": 0.9098802745342255,
       "p90_std_ratio": 0.9466842234134674
     },
