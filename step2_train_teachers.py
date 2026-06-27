@@ -1,5 +1,15 @@
 """
 Step 2 — Train flow matching teacher models in latent space.
+
+Requires: results/<exp_name>/latents/real/latents_<dim>.npy  (produced by step1)
+Saves:    results/<exp_name>/checkpoints/teacher_<dim>.pt
+          results/<exp_name>/latents/real/latents_<dim>_norm_stats.npy
+          results/<exp_name>/plots/teacher_loss_<dim>.png
+
+Usage:
+    python step2_train_teachers.py                        # all dims sequentially
+    python step2_train_teachers.py --dim 128              # single dim
+    python step2_train_teachers.py --exp-name my_run      # custom experiment
 """
 
 import argparse
@@ -19,6 +29,8 @@ import matplotlib.pyplot as plt
 from models.diffusion import FlowMatching
 from models.denoiser import TeacherDenoiser, param_count
 
+from exp_config import get_paths, add_exp_arg, print_exp_summary, ExpPaths
+
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
 EPOCHS       = 1000
 BATCH_SIZE   = 256
@@ -27,10 +39,8 @@ WEIGHT_DECAY = 1e-4
 GRAD_CLIP    = 1.0
 SAVE_EVERY   = 50
 EMA_DECAY    = 0.9999
-EARLY_STOP_PATIENCE = 300
+EARLY_STOP_PATIENCE  = 300
 EARLY_STOP_MIN_DELTA = 1e-4
-LATENT_DIR   = "latents"
-MODEL_DIR    = "models"
 LOG_INTERVAL = 10
 
 
@@ -43,14 +53,14 @@ def get_device(dim: int = None) -> str:
     return "cpu"
 
 
-def normalise_latents(latents: np.ndarray, dim: int):
+def normalise_latents(latents: np.ndarray, dim: int, real_latent_dir: Path):
     mean = latents.mean(axis=0, keepdims=True)
     std  = latents.std(axis=0, keepdims=True)
     latents_norm = ((latents - mean) / (std + 1e-8)).astype(np.float32)
 
-    stats_path = Path(LATENT_DIR) / f"latents_{dim}_norm_stats.npy"
+    stats_path = real_latent_dir / f"latents_{dim}_norm_stats.npy"
     np.save(stats_path, np.stack([mean.squeeze(), std.squeeze()]))
-    
+
     print(
         f"  Norm stats saved → {stats_path}  "
         f"(mean avg={mean.mean():.4f}, std avg={std.mean():.4f}, "
@@ -74,8 +84,8 @@ def update_ema(ema_model, model, decay=EMA_DECAY):
             ema_p.data.mul_(decay).add_(p.data, alpha=1 - decay)
 
 
-def plot_teacher_loss(history: list, dim: int, results_dir: str = "results/trained_AE") -> None:
-    Path(results_dir).mkdir(parents=True, exist_ok=True)
+def plot_teacher_loss(history: list, dim: int, plots_dir: Path) -> None:
+    plots_dir.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(range(1, len(history) + 1), history, color="royalblue", linewidth=1.5)
     ax.set_xlabel("Epoch")
@@ -83,7 +93,7 @@ def plot_teacher_loss(history: list, dim: int, results_dir: str = "results/train
     ax.set_title(f"Teacher Denoiser — Training Loss  (latent_dim={dim})")
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    out = Path(results_dir) / f"teacher_loss_{dim}.png"
+    out = plots_dir / f"teacher_loss_{dim}.png"
     plt.savefig(str(out), dpi=150)
     plt.close()
     print(f"  Loss curve → {out}")
@@ -117,17 +127,27 @@ def train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dim", type=int, choices=LATENT_DIMS, default=None)
+    add_exp_arg(parser)
     args = parser.parse_args()
 
-    dims = [args.dim] if args.dim is not None else LATENT_DIMS
+    paths = get_paths(args.exp_name)
+
+    dims   = [args.dim] if args.dim is not None else LATENT_DIMS
     device = get_device(args.dim)
     print(f"Device: {device}  |  dims: {dims}")
-    Path(MODEL_DIR).mkdir(parents=True, exist_ok=True)
+
+    print_exp_summary(
+        paths,
+        ckpt_path=paths.ckpt_dir,
+        latent_path=paths.real_latent_dir,
+    )
+
+    paths.ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     flow = FlowMatching(device=device)
 
     for dim in dims:
-        out_path = Path(MODEL_DIR) / f"teacher_{dim}.pt"
+        out_path = paths.ckpt_dir / f"teacher_{dim}.pt"
         if out_path.exists():
             print(f"\n[skip] teacher_{dim}.pt already exists.")
             continue
@@ -135,8 +155,13 @@ def main():
         print(f"\n{'='*60}")
         print(f"  Training teacher  latent_dim = {dim}")
 
-        latents_raw = np.load(Path(LATENT_DIR) / f"latents_{dim}.npy")
-        latents, mean, std = normalise_latents(latents_raw, dim)
+        latents_path = paths.real_latent_dir / f"latents_{dim}.npy"
+        if not latents_path.exists():
+            print(f"  [ERROR] {latents_path} not found — run step1 first.")
+            continue
+
+        latents_raw = np.load(latents_path)
+        latents, mean, std = normalise_latents(latents_raw, dim, paths.real_latent_dir)
 
         dataset = TensorDataset(torch.from_numpy(latents))
         loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,
@@ -149,10 +174,10 @@ def main():
         optimizer = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
         scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=LR * 0.01)
 
-        best_loss = float("inf")
+        best_loss  = float("inf")
         best_epoch = 0
         epochs_without_improvement = 0
-        history = []
+        history    = []
         best_state = None
 
         for epoch in tqdm(range(1, EPOCHS + 1), desc=f"dim={dim}"):
@@ -161,7 +186,7 @@ def main():
             history.append(avg_loss)
 
             if avg_loss < best_loss - EARLY_STOP_MIN_DELTA:
-                best_loss = avg_loss
+                best_loss  = avg_loss
                 best_epoch = epoch
                 epochs_without_improvement = 0
                 best_state = deepcopy(ema_model.state_dict())
@@ -169,12 +194,12 @@ def main():
                 epochs_without_improvement += 1
 
             if epoch % SAVE_EVERY == 0:
-                interim = Path(MODEL_DIR) / f"teacher_{dim}_ep{epoch:03d}.pt"
+                interim = paths.ckpt_dir / f"teacher_{dim}_ep{epoch:03d}.pt"
                 torch.save({
                     "model_state_dict": ema_model.state_dict(),
                     "latent_dim": dim,
                     "latent_mean": torch.from_numpy(mean.astype(np.float32)),
-                    "latent_std": torch.from_numpy(std.astype(np.float32)),
+                    "latent_std":  torch.from_numpy(std.astype(np.float32)),
                 }, interim)
 
             print(f"  epoch {epoch:03d}  avg_loss={avg_loss:.5f}  best={best_loss:.5f}")
@@ -184,14 +209,16 @@ def main():
                     f"Best epoch={best_epoch:03d}, best_loss={best_loss:.5f}"
                 )
                 break
+
         if best_state is not None:
             ema_model.load_state_dict(best_state)
+
         torch.save(
             {
                 "model_state_dict": ema_model.state_dict(),
                 "latent_dim": dim,
                 "latent_mean": torch.from_numpy(mean.astype(np.float32)),
-                "latent_std": torch.from_numpy(std.astype(np.float32)),
+                "latent_std":  torch.from_numpy(std.astype(np.float32)),
                 "loss_history": history,
                 "best_loss": best_loss,
                 "best_epoch": best_epoch,
@@ -199,7 +226,7 @@ def main():
             out_path,
         )
         print(f"  Saved → {out_path}  (best_loss={best_loss:.5f})")
-        plot_teacher_loss(history, dim)
+        plot_teacher_loss(history, dim, paths.plots_dir)
 
     print("\nStep 2 complete.")
 

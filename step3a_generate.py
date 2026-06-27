@@ -2,20 +2,19 @@
 Step 3a — Generate synthetic latent datasets from trained teacher models.
 
 For each latent dim:
-  - Runs teacher Euler sampling to produce 4 synthetic x_0 datasets:
-      50k, 100k, 150k, 200k samples (normalized latents, float32)
-    Saves: synthetic/{dim}/synthetic_{dim}_{n}.npy
-  - Generates a trajectory dataset for TRAJ_SAMPLES samples:
-      shape (TRAJ_SAMPLES, EULER_STEPS+1, dim), float16
-      traj[:, 0] = x_1 (start noise), traj[:, -1] = x_0 (final data)
-    Saves: synthetic/{dim}/trajectories_{dim}.npy
+  - Runs teacher Euler sampling to produce 4 synthetic x_0 datasets.
+    Saves: results/<exp_name>/latents/teacher/dim_<dim>/synthetic_<dim>_<n>.npy
+  - Generates a trajectory dataset for TRAJ_SAMPLES samples.
+    Saves: results/<exp_name>/latents/teacher/dim_<dim>/trajectories_<dim>.npy
 
-All outputs are in normalized latent space (same space the teacher was trained in).
-Skips any file that already exists — safe to restart.
+All outputs are in normalised latent space (same space the teacher was trained in).
+Skips any file that already exists by default — pass --overwrite to regenerate.
 
 Usage:
-    python step3a_generate.py              # all dims sequentially
-    python step3a_generate.py --dim 128    # single dim (for parallel GPU runs)
+    python step3a_generate.py                             # all dims sequentially
+    python step3a_generate.py --dim 128                   # single dim
+    python step3a_generate.py --dim 128 --overwrite       # force regeneration
+    python step3a_generate.py --exp-name my_run           # custom experiment
 """
 
 import argparse
@@ -27,14 +26,13 @@ from tqdm import tqdm
 
 from models.diffusion import FlowMatching
 from models.denoiser import load_teacher
+from exp_config import get_paths, add_exp_arg, print_exp_summary, ExpPaths
 
 LATENT_DIMS     = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES   = [50_000, 100_000, 150_000, 200_000]
 TRAJ_SAMPLES    = 200_000    # trajectory dataset size (storage-bounded)
 EULER_STEPS     = 200
 GEN_BATCH       = 1_024
-MODEL_DIR       = Path("models")
-SYNTHETIC_DIR   = Path("synthetic")
 
 
 def get_device(dim: int = None) -> torch.device:
@@ -52,8 +50,12 @@ def generate_dataset(
     dim: int,
     n_samples: int,
     out_path: Path,
+    overwrite: bool,
 ) -> None:
     """Generate n_samples via Euler sampling and save as float32 memmap."""
+    if out_path.exists() and not overwrite:
+        print(f"  [skip] {out_path.name} already exists.")
+        return
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out = np.memmap(str(out_path), dtype="float32", mode="w+", shape=(n_samples, dim))
 
@@ -75,12 +77,16 @@ def generate_trajectories(
     flow: FlowMatching,
     dim: int,
     out_path: Path,
+    overwrite: bool,
 ) -> None:
     """
     Generate TRAJ_SAMPLES trajectories with all EULER_STEPS+1 intermediate states.
     Saved as float16 memmap of shape (TRAJ_SAMPLES, EULER_STEPS+1, dim).
     traj[:, 0] = starting noise x_1, traj[:, -1] = final sample x_0.
     """
+    if out_path.exists() and not overwrite:
+        print(f"  [skip] {out_path.name} already exists.")
+        return
     out_path.parent.mkdir(parents=True, exist_ok=True)
     n_frames = EULER_STEPS + 1
     out = np.memmap(
@@ -106,12 +112,13 @@ def generate_trajectories(
     print(f"    Saved → {out_path}  ({TRAJ_SAMPLES:,} × {n_frames} × {dim}  float16  ~{size_gb:.1f} GB)")
 
 
-def generate_for_dim(dim: int, device: torch.device) -> None:
+def generate_for_dim(dim: int, device: torch.device,
+                     paths: ExpPaths, overwrite: bool) -> None:
     print(f"\n{'='*60}")
     print(f"Generating synthetic data  latent_dim={dim}  device={device}")
     print(f"{'='*60}")
 
-    teacher_path = MODEL_DIR / f"teacher_{dim}.pt"
+    teacher_path = paths.ckpt_dir / f"teacher_{dim}.pt"
     if not teacher_path.exists():
         print(f"[ERROR] {teacher_path} not found — run step2 first.")
         return
@@ -119,35 +126,38 @@ def generate_for_dim(dim: int, device: torch.device) -> None:
     model = load_teacher(str(teacher_path), latent_dim=dim, device=str(device))
     flow  = FlowMatching(device=str(device))
 
-    dim_dir = SYNTHETIC_DIR / str(dim)
+    dim_dir = paths.teacher_latent_dir / f"dim_{dim}"
 
-    # ── synthetic x_0 datasets ────────────────────────────────────────────────
     for n in DATASET_SIZES:
         out_path = dim_dir / f"synthetic_{dim}_{n}.npy"
-        if out_path.exists():
-            print(f"  [skip] {out_path.name} already exists.")
-            continue
         print(f"  Generating dataset  n={n:,} …")
-        generate_dataset(model, flow, dim, n, out_path)
+        generate_dataset(model, flow, dim, n, out_path, overwrite)
 
-    # ── trajectory dataset (50k only, float16) ───────────────────────────────
     traj_path = dim_dir / f"trajectories_{dim}.npy"
-    if traj_path.exists():
-        print(f"  [skip] {traj_path.name} already exists.")
-    else:
-        print(f"  Generating trajectories  n={TRAJ_SAMPLES:,}  steps={EULER_STEPS} …")
-        generate_trajectories(model, flow, dim, traj_path)
+    print(f"  Generating trajectories  n={TRAJ_SAMPLES:,}  steps={EULER_STEPS} …")
+    generate_trajectories(model, flow, dim, traj_path, overwrite)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dim", type=int, choices=LATENT_DIMS,
                         help="Single latent dim to generate (omit for all dims sequentially)")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Regenerate even if output files already exist")
+    add_exp_arg(parser)
     args = parser.parse_args()
+
+    paths = get_paths(args.exp_name)
+
+    print_exp_summary(
+        paths,
+        ckpt_path=paths.ckpt_dir,
+        latent_path=paths.teacher_latent_dir,
+    )
 
     dims = [args.dim] if args.dim else LATENT_DIMS
     for dim in dims:
-        generate_for_dim(dim, get_device(dim))
+        generate_for_dim(dim, get_device(dim), paths, args.overwrite)
 
     print("\nStep 3a complete.")
 

@@ -1,11 +1,13 @@
 """
 Step 0 — Train ConvAutoencoder from scratch on CIFAR-10 for each latent dim.
 
-Saves: checkpoints/ae_{dim}.pt  (state_dict + latent_dim)
+Saves: results/<exp_name>/checkpoints/ae_<dim>.pt
+       results/<exp_name>/config.json
 
 Usage:
-    python step0_train_autoencoder.py            # all dims sequentially
-    python step0_train_autoencoder.py --dim 64   # single dim (for parallel runs)
+    python step0_train_autoencoder.py                        # all dims sequentially
+    python step0_train_autoencoder.py --dim 64               # single dim
+    python step0_train_autoencoder.py --exp-name my_run      # custom experiment name
 """
 
 import argparse
@@ -21,15 +23,16 @@ from tqdm import tqdm
 from models.autoencoder import ConvAutoencoder
 import torch.nn.functional as F
 
+from exp_config import get_paths, add_exp_arg, save_config, print_exp_summary, ExpPaths
+
 LATENT_DIMS  = [64, 128, 256, 384, 512, 1024]
 EPOCHS       = 1000
 BATCH_SIZE   = 128
 LR           = 1e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP    = 5.0
-CKPT_DIR     = Path("checkpoints")
 LPIPS_WEIGHT = 1.0
-MSE_WEIGHT = 0.0
+MSE_WEIGHT   = 0.0
 KL_WEIGHT    = 0.0
 
 
@@ -42,20 +45,20 @@ def get_cifar10_loader(batch_size: int) -> DataLoader:
                       num_workers=2, pin_memory=True)
 
 
-def train_one_dim(dim: int, device: torch.device) -> None:
+def train_one_dim(dim: int, device: torch.device, ckpt_dir: Path) -> None:
     print(f"\n{'='*60}")
     print(f"Training ConvAutoencoder  latent_dim={dim}  device={device}")
     print(f"{'='*60}")
 
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    save_path = CKPT_DIR / f"ae_{dim}.pt"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    save_path = ckpt_dir / f"ae_{dim}.pt"
 
     loader = get_cifar10_loader(BATCH_SIZE)
     model  = ConvAutoencoder(latent_dim=dim).to(device)
     opt      = AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched    = CosineAnnealingLR(opt, T_max=EPOCHS)
     lpips_fn = lpips.LPIPS(net='vgg').to(device)
-    lpips_fn.eval()  # frozen VGG  backbone — only AE weights train
+    lpips_fn.eval()  # frozen VGG backbone — only AE weights train
     for p in lpips_fn.parameters():
         p.requires_grad = False
 
@@ -135,12 +138,38 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dim", type=int, choices=LATENT_DIMS,
                         help="Single latent dim to train (omit for all dims sequentially)")
+    add_exp_arg(parser)
     args = parser.parse_args()
+
+    paths = get_paths(args.exp_name)
+
+    save_config(paths, extra={
+        "model": "ConvAutoencoder",
+        "dataset": "CIFAR-10",
+        "latent_dims": LATENT_DIMS,
+        "loss_type": "LPIPS+MSE+KL",
+        "lpips_net": "vgg",
+        "lpips_input_size": 64,
+        "mse_weight": MSE_WEIGHT,
+        "kl_weight": KL_WEIGHT,
+        "lpips_weight": LPIPS_WEIGHT,
+        "lr": LR,
+        "batch_size": BATCH_SIZE,
+        "epochs": EPOCHS,
+        "weight_decay": WEIGHT_DECAY,
+        "grad_clip": GRAD_CLIP,
+        "deterministic_encoding": True,
+    })
 
     dims = [args.dim] if args.dim else LATENT_DIMS
 
+    print_exp_summary(
+        paths,
+        ckpt_path=paths.ckpt_dir / "ae_<dim>.pt",
+    )
+
     for dim in dims:
-        train_one_dim(dim, get_device(dim))
+        train_one_dim(dim, get_device(dim), paths.ckpt_dir)
 
 
 if __name__ == "__main__":

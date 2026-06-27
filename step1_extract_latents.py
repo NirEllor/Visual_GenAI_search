@@ -1,12 +1,13 @@
 """
 Step 1 — Encode all 50k CIFAR-10 training images with trained ConvAutoencoders.
 
-Requires: checkpoints/ae_{dim}.pt  (produced by step0)
-Saves:    latents/latents_{dim}.npy  — shape (50000, dim), float32
+Requires: results/<exp_name>/checkpoints/ae_<dim>.pt  (produced by step0)
+Saves:    results/<exp_name>/latents/real/latents_<dim>.npy  — shape (50000, dim), float32
 
 Usage:
-    python step1_extract_latents.py            # all dims sequentially
-    python step1_extract_latents.py --dim 64   # single dim
+    python step1_extract_latents.py                        # all dims sequentially
+    python step1_extract_latents.py --dim 64               # single dim
+    python step1_extract_latents.py --exp-name my_run      # custom experiment
 """
 
 import argparse
@@ -18,15 +19,14 @@ from torchvision import datasets, transforms
 from tqdm import tqdm
 
 from models.autoencoder import ConvAutoencoder
+from exp_config import get_paths, add_exp_arg, print_exp_summary, ExpPaths
 
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
 BATCH_SIZE  = 512
-CKPT_DIR    = Path("checkpoints")
-LATENT_DIR  = Path("latents")
 
 
-def load_ae(dim: int, device: torch.device) -> ConvAutoencoder:
-    ckpt_path = CKPT_DIR / f"ae_{dim}.pt"
+def load_ae(dim: int, ckpt_dir: Path, device: torch.device) -> ConvAutoencoder:
+    ckpt_path = ckpt_dir / f"ae_{dim}.pt"
     if not ckpt_path.exists():
         raise FileNotFoundError(f"{ckpt_path} not found — run step0 first.")
     ckpt  = torch.load(ckpt_path, map_location=device, weights_only=True)
@@ -36,28 +36,26 @@ def load_ae(dim: int, device: torch.device) -> ConvAutoencoder:
     return model
 
 
-def extract_latents(dim: int, device: torch.device) -> None:
+def extract_latents(dim: int, device: torch.device, paths: ExpPaths) -> None:
     print(f"\n{'='*60}")
     print(f"Extracting latents  latent_dim={dim}  device={device}")
     print(f"{'='*60}")
 
-    LATENT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = LATENT_DIR / f"latents_{dim}.npy"
+    paths.real_latent_dir.mkdir(parents=True, exist_ok=True)
+    out_path = paths.real_latent_dir / f"latents_{dim}.npy"
 
     tf = transforms.Compose([transforms.ToTensor()])  # → [0, 1], matches step0 training
     dataset = datasets.CIFAR10(root="data", train=True, download=True, transform=tf)
     loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False,
                          num_workers=2, pin_memory=True)
 
-    model = load_ae(dim, device)
+    model = load_ae(dim, paths.ckpt_dir, device)
 
     all_latents = []
     with torch.no_grad():
         for imgs, _ in tqdm(loader, desc=f"  Encoding (dim={dim})"):
             imgs = imgs.to(device)
-
             _, mean, _ = model.encode(imgs, sample=False)
-
             all_latents.append(mean.cpu().numpy())
 
     latents = np.concatenate(all_latents, axis=0).astype(np.float32)
@@ -66,8 +64,6 @@ def extract_latents(dim: int, device: torch.device) -> None:
     print(f"  Std        : {latents.std():.4f}")
     print(f"  Min        : {latents.min():.4f}")
     print(f"  Max        : {latents.max():.4f}")
-    print(f"  Latents shape : {latents.shape}")
-    print(f"  Value range   : [{latents.min():.3f}, {latents.max():.3f}]")
     np.save(out_path, latents)
     print(f"  Saved → {out_path}")
 
@@ -76,13 +72,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dim", type=int, choices=LATENT_DIMS,
                         help="Single latent dim to extract (omit for all dims sequentially)")
+    add_exp_arg(parser)
     args = parser.parse_args()
+
+    paths = get_paths(args.exp_name)
+
+    print_exp_summary(
+        paths,
+        ckpt_path=paths.ckpt_dir,
+        latent_path=paths.real_latent_dir,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dims   = [args.dim] if args.dim else LATENT_DIMS
 
     for dim in dims:
-        extract_latents(dim, device)
+        extract_latents(dim, device, paths)
 
 
 if __name__ == "__main__":

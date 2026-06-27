@@ -5,11 +5,12 @@ Each figure has two subplots:
   Left  : teacher loss over its full training run
   Right : 4 student losses (one per synthetic dataset size) overlaid
 
-Saves: results/trained_AE/losses_{dim}.png
+Saves: results/<exp_name>/plots/losses_<dim>.png
 
 Usage:
-    python plot_losses.py           # all dims
-    python plot_losses.py --dim 128 # single dim
+    python plot_losses.py                            # all dims
+    python plot_losses.py --dim 128                  # single dim
+    python plot_losses.py --exp-name my_run          # custom experiment
 """
 
 import argparse
@@ -20,14 +21,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from exp_config import get_paths, add_exp_arg, print_exp_summary
+
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES = [250_000, 500_000, 1_000_000, 2_000_000]
 SIZE_LABELS   = {250_000: "250k", 500_000: "500k",
                  1_000_000: "1M",  2_000_000: "2M"}
 SIZE_COLORS   = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
-
-MODEL_DIR   = Path("models")
-RESULTS_DIR = Path("results/trained_AE")
 
 
 def load_history(ckpt_path: Path) -> list:
@@ -39,12 +39,12 @@ def load_history(ckpt_path: Path) -> list:
     return h if isinstance(h, list) else h.get("total", [])
 
 
-def plot_dim(dim: int) -> None:
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+def plot_dim(dim: int, ckpt_dir: Path, plots_dir: Path) -> None:
+    plots_dir.mkdir(parents=True, exist_ok=True)
 
-    teacher_history = load_history(MODEL_DIR / f"teacher_{dim}.pt")
+    teacher_history = load_history(ckpt_dir / f"teacher_{dim}.pt")
     student_histories = {
-        size: load_history(MODEL_DIR / f"student_{dim}_{size}.pt")
+        size: load_history(ckpt_dir / f"student_{dim}_{size}.pt")
         for size in DATASET_SIZES
     }
 
@@ -83,14 +83,14 @@ def plot_dim(dim: int) -> None:
         ax_s.text(0.5, 0.5, "No student checkpoints found",
                   ha="center", va="center", transform=ax_s.transAxes, color="grey")
 
-    ax_s.set_title(f"Students  (4 synthetic dataset sizes)")
+    ax_s.set_title("Students  (4 synthetic dataset sizes)")
     ax_s.set_xlabel("Epoch")
     ax_s.set_ylabel("Flow Matching Loss")
     ax_s.legend(title="Dataset size", loc="upper right")
     ax_s.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    out = RESULTS_DIR / f"losses_{dim}.png"
+    out = plots_dir / f"losses_{dim}.png"
     plt.savefig(str(out), dpi=150)
     plt.close(fig)
     print(f"  Saved → {out}")
@@ -100,12 +100,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dim", type=int, choices=LATENT_DIMS,
                         help="Single dim to plot (omit for all)")
+    add_exp_arg(parser)
     args = parser.parse_args()
+
+    paths = get_paths(args.exp_name)
+
+    print_exp_summary(
+        paths,
+        ckpt_path=paths.ckpt_dir,
+        gen_path=paths.plots_dir,
+    )
 
     dims = [args.dim] if args.dim else LATENT_DIMS
     for dim in dims:
         print(f"Plotting losses  dim={dim} …")
-        plot_dim(dim)
+        plot_dim(dim, paths.ckpt_dir, paths.plots_dir)
 
 
 if __name__ == "__main__":

@@ -6,15 +6,16 @@ For each latent dim × dataset size (6 × 4 = 24 students):
   - Trains a StudentDenoiser with pure flow matching loss
   - x_1 and t are sampled ONCE per batch and used consistently
     for both the interpolation and the velocity target — no hidden resampling
-  Saves: models/student_{dim}_{n_samples}.pt
+  Saves: results/<exp_name>/checkpoints/student_<dim>_<n_samples>.pt
 
 Supports --dim and --size for fine-grained parallel GPU runs.
-Skip any student checkpoint that already exists — safe to restart.
+Skips any student checkpoint that already exists — safe to restart.
 
 Usage:
-    python step3b_distill.py                        # all 24 students sequentially
-    python step3b_distill.py --dim 128              # all 4 sizes for dim=128
-    python step3b_distill.py --dim 128 --size 500000  # single student
+    python step3b_distill.py                               # all 24 students sequentially
+    python step3b_distill.py --dim 128                     # all 4 sizes for dim=128
+    python step3b_distill.py --dim 128 --size 500000       # single student
+    python step3b_distill.py --exp-name my_run             # custom experiment
 """
 
 import argparse
@@ -36,6 +37,7 @@ from models.denoiser import (
     StudentDenoiser,
     param_count,
 )
+from exp_config import get_paths, add_exp_arg, print_exp_summary, ExpPaths
 
 LATENT_DIMS   = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES = [50_000, 100_000, 150_000, 200_000]
@@ -46,13 +48,8 @@ WEIGHT_DECAY  = 1e-4
 GRAD_CLIP     = 1.0
 EMA_DECAY     = 0.9999
 LOG_INTERVAL  = 50
-EARLY_STOP_PATIENCE = 50
+EARLY_STOP_PATIENCE  = 50
 EARLY_STOP_MIN_DELTA = 0.0
-
-MODEL_DIR     = Path("models")
-SYNTHETIC_DIR = Path("synthetic")
-LATENT_DIR    = Path("latents")
-RESULTS_DIR   = Path("results/trained_AE")
 
 
 def get_device(dim: int = None) -> torch.device:
@@ -78,8 +75,8 @@ def update_ema(ema: torch.nn.Module, model: torch.nn.Module) -> None:
             ema_p.data.mul_(EMA_DECAY).add_(p.data, alpha=1.0 - EMA_DECAY)
 
 
-def plot_loss(history: list, dim: int, n_samples: int) -> None:
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+def plot_loss(history: list, dim: int, n_samples: int, plots_dir: Path) -> None:
+    plots_dir.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(range(1, len(history) + 1), history, color="royalblue", linewidth=1.5)
     ax.set_xlabel("Epoch")
@@ -87,41 +84,38 @@ def plot_loss(history: list, dim: int, n_samples: int) -> None:
     ax.set_title(f"Student Loss  (dim={dim}, n={n_samples:,})")
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    out = RESULTS_DIR / f"student_loss_{dim}_{n_samples}.png"
+    out = plots_dir / f"student_loss_{dim}_{n_samples}.png"
     plt.savefig(str(out), dpi=150)
     plt.close()
 
 
 def train_student(dim: int, n_samples: int, device: torch.device,
-                  load_to_ram: bool = True) -> None:
-    out_path = MODEL_DIR / f"student_{dim}_{n_samples}.pt"
+                  paths: ExpPaths, load_to_ram: bool = True) -> None:
+    out_path = paths.ckpt_dir / f"student_{dim}_{n_samples}.pt"
     if out_path.exists():
         print(f"  [skip] {out_path.name} already exists.")
         return
 
-    # 🚨 שינוי: טוענים את קובץ המסלולים המלא של המורה
-    data_path = SYNTHETIC_DIR / str(dim) / f"trajectories_{dim}.npy"
+    # Load teacher trajectory file
+    data_path = paths.teacher_latent_dir / f"dim_{dim}" / f"trajectories_{dim}.npy"
     if not data_path.exists():
         print(f"  [ERROR] {data_path} not found — run step3a first.")
         return
 
-    stats_path = LATENT_DIR / f"latents_{dim}_norm_stats.npy"
+    stats_path = paths.real_latent_dir / f"latents_{dim}_norm_stats.npy"
     if not stats_path.exists():
         print(f"  [ERROR] {stats_path} not found — run step2 first.")
         return
 
-    stats = np.load(stats_path)
+    stats    = np.load(stats_path)
     lat_mean = stats[0].astype(np.float32)
-    lat_std = stats[1].astype(np.float32)
+    lat_std  = stats[1].astype(np.float32)
 
-    # קובץ הטרז'קטוריות מכיל 50,000 דוגמאות קבועות
-    # צורת המטריצה: (TRAJ_SAMPLES, EULER_STEPS + 1, dim)
     n_frames = 201  # EULER_STEPS + 1
     total_traj_samples = 200_000
 
     print(f"\n  dim={dim}  n_samples={n_samples:,} (Clamped to {total_traj_samples:,} traj data)  device={device}")
 
-    # טעינת ה-memmap של המסלולים
     traj_data = np.memmap(
         str(data_path),
         dtype="float16",
@@ -129,68 +123,59 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         shape=(total_traj_samples, n_frames, dim)
     )
 
-    # 🚨 שליפת נקודות הקצה המזווגות של המורה (float32 לאימון)
-    # אינדקס 0 הוא הרעש ההתחלתי (x_1), אינדקס 1- הוא התמונה הסופית (x_0)
+    # Extract paired endpoints from teacher trajectories:
+    # index 0 = starting noise (x_1), index -1 = final data (x_0)
     print("  Extracting paired endpoints from teacher trajectories...")
-    x1_paired = np.array(traj_data[:n_samples, 0, :], dtype=np.float32)  # noise
-    x0_paired = np.array(traj_data[:n_samples, -1, :], dtype=np.float32)  # final data
+    x1_paired = np.array(traj_data[:n_samples, 0,  :], dtype=np.float32)
+    x0_paired = np.array(traj_data[:n_samples, -1, :], dtype=np.float32)
 
-    del traj_data  # שחרור ה-memmap מהזיכרון
+    del traj_data
 
     x1_tensor = torch.from_numpy(x1_paired)
     x0_tensor = torch.from_numpy(x0_paired)
 
-    # 🚨 יצירת דאטאסט המכיל את שני הוקטורים המזווגים יחד!
     dataset = TensorDataset(x1_tensor, x0_tensor)
-    loader = DataLoader(
+    loader  = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
-        shuffle=True,  # Shuffle משאיר את הזיווג בין x_1 ל-x_0 בתוך ה-Batch
+        shuffle=True,
         num_workers=2,
         pin_memory=True,
     )
 
     steps_per_epoch = len(loader)
-    total_steps = EPOCHS * steps_per_epoch
+    total_steps     = EPOCHS * steps_per_epoch
 
     print(f"  Batch shape      : ({BATCH_SIZE}, {dim})")
     print(f"  Steps per epoch  : {steps_per_epoch:,}")
     print(f"  Total opt. steps : {total_steps:,}")
 
-    student = StudentDenoiser(latent_dim=dim).to(device)
+    student     = StudentDenoiser(latent_dim=dim).to(device)
     ema_student = create_ema(student, device)
     print(f"  Student params   : {param_count(student)}")
 
     optimizer = AdamW(student.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=EPOCHS,
-        eta_min=LR * 0.01,
-    )
+    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=LR * 0.01)
 
-    best_loss = float("inf")
+    best_loss  = float("inf")
     best_epoch = 0
     best_state = None
     epochs_without_improvement = 0
-
-    history = []
+    history    = []
 
     for epoch in tqdm(range(1, EPOCHS + 1), desc=f"    dim={dim} n={n_samples:,}"):
         student.train()
         total_loss = 0.0
 
-        # 🚨 הלולאה מקבלת כעת את הרעש המקורי והיעד המקורי ביחד
         for batch_idx, (x_1, x_0) in enumerate(loader):
             x_1 = x_1.to(device)
             x_0 = x_0.to(device)
 
-            # הסטודנט מקבל את נקודת הרעש x_1 ומנחש את המהירות ליעד
-            x_t = x_1
+            x_t      = x_1
             v_target = x_1 - x_0
 
             v_pred = student(x_t)
-
-            loss = F.mse_loss(v_pred, v_target)
+            loss   = F.mse_loss(v_pred, v_target)
 
             optimizer.zero_grad()
             loss.backward()
@@ -213,7 +198,7 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         history.append(avg_loss)
 
         if avg_loss < best_loss - EARLY_STOP_MIN_DELTA:
-            best_loss = avg_loss
+            best_loss  = avg_loss
             best_epoch = epoch
             epochs_without_improvement = 0
             best_state = deepcopy(ema_student.state_dict())
@@ -237,13 +222,14 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     if best_state is not None:
         ema_student.load_state_dict(best_state)
 
+    paths.ckpt_dir.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "model_state_dict": ema_student.state_dict(),
             "latent_dim": dim,
             "n_samples": n_samples,
             "latent_mean": torch.from_numpy(lat_mean.astype(np.float32)),
-            "latent_std": torch.from_numpy(lat_std.astype(np.float32)),
+            "latent_std":  torch.from_numpy(lat_std.astype(np.float32)),
             "loss_history": history,
             "best_loss": best_loss,
             "best_epoch": best_epoch,
@@ -256,7 +242,8 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         f"(best_epoch={best_epoch}, best_loss={best_loss:.5f})"
     )
 
-    plot_loss(history, dim, n_samples)
+    plot_loss(history, dim, n_samples, paths.plots_dir)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -269,12 +256,19 @@ def main():
                         help="Copy dataset into RAM before training (default: on)")
     parser.add_argument("--no-load-to-ram", dest="load_to_ram", action="store_false",
                         help="Keep dataset file-backed via memmap (lower RAM, slower)")
+    add_exp_arg(parser)
     args = parser.parse_args()
+
+    paths = get_paths(args.exp_name)
 
     dims  = [args.dim]  if args.dim  else LATENT_DIMS
     sizes = [args.size] if args.size else DATASET_SIZES
 
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    print_exp_summary(
+        paths,
+        ckpt_path=paths.ckpt_dir,
+        latent_path=paths.teacher_latent_dir,
+    )
 
     for dim in dims:
         device = get_device(dim)
@@ -282,7 +276,7 @@ def main():
         print(f"Distilling students  latent_dim={dim}  device={device}")
         print(f"{'='*60}")
         for n_samples in sizes:
-            train_student(dim, n_samples, device, load_to_ram=args.load_to_ram)
+            train_student(dim, n_samples, device, paths, load_to_ram=args.load_to_ram)
 
     print("\nStep 3b complete.")
 
