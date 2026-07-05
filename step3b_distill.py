@@ -114,22 +114,29 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     n_frames = 201  # EULER_STEPS + 1
     total_traj_samples = 200_000
 
-    print(f"\n  dim={dim}  n_samples={n_samples:,} (Clamped to {total_traj_samples:,} traj data)  device={device}")
+    # 🚨 פתרון צוואר הבקבוק: טעינה מהירה של זוגות מוכנים מהדיסק
+    paired_data_path = paths.teacher_latent_dir / f"dim_{dim}" / f"paired_endpoints_{dim}.npz"
 
-    traj_data = np.memmap(
-        str(data_path),
-        dtype="float16",
-        mode="r",
-        shape=(total_traj_samples, n_frames, dim)
-    )
+    if not paired_data_path.exists():
+        print(f"  [First Run] Extracting and caching paired endpoints for dim {dim}...")
+        traj_data = np.memmap(
+            str(data_path),
+            dtype="float16",
+            mode="r",
+            shape=(total_traj_samples, n_frames, dim)
+        )
+        # שולפים את הכל פעם אחת ל-RAM וחוסכים קריאות עתידיות
+        x1_all = np.array(traj_data[:, 0, :], dtype=np.float32)
+        x0_all = np.array(traj_data[:, -1, :], dtype=np.float32)
+        np.savez(str(paired_data_path), x1=x1_all, x0=x0_all)
+        del traj_data # 🚨 ה-del נשאר רק כאן, איפה שהמשתנה באמת קיים!
 
-    # Extract paired endpoints from teacher trajectories:
-    # index 0 = starting noise (x_1), index -1 = final data (x_0)
-    print("  Extracting paired endpoints from teacher trajectories...")
-    x1_paired = np.array(traj_data[:n_samples, 0,  :], dtype=np.float32)
-    x0_paired = np.array(traj_data[:n_samples, -1, :], dtype=np.float32)
+    # טעינה ישירה, רציפה ומהירה מהדיסק לתוך ה-RAM
+    cached = np.load(str(paired_data_path))
+    x1_paired = cached['x1'][:n_samples]
+    x0_paired = cached['x0'][:n_samples]
 
-    del traj_data
+    cached.close()
 
     x1_tensor = torch.from_numpy(x1_paired)
     x0_tensor = torch.from_numpy(x0_paired)
@@ -142,7 +149,6 @@ def train_student(dim: int, n_samples: int, device: torch.device,
         num_workers=2,
         pin_memory=True,
     )
-
     steps_per_epoch = len(loader)
     total_steps     = EPOCHS * steps_per_epoch
 
@@ -243,8 +249,8 @@ def train_student(dim: int, n_samples: int, device: torch.device,
     )
 
     plot_loss(history, dim, n_samples, paths.plots_dir)
-
-
+    
+    # ... שאר הקוד שלך ממשיך רגיל לחלוטין ...
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dim", type=int, choices=LATENT_DIMS,

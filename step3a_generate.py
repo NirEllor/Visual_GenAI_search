@@ -32,7 +32,7 @@ LATENT_DIMS     = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES   = [50_000, 100_000, 150_000, 200_000]
 TRAJ_SAMPLES    = 200_000    # trajectory dataset size (storage-bounded)
 EULER_STEPS     = 200
-GEN_BATCH       = 1_024
+GEN_BATCH       = 128
 
 
 def get_device(dim: int = None) -> torch.device:
