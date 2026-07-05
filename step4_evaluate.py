@@ -31,7 +31,8 @@ from PIL import Image
 from tqdm import tqdm
 
 from exp_config import (
-    get_paths, add_exp_arg, print_exp_summary,
+    get_paths, add_exp_arg, add_teacher_ckpt_arg,
+    get_teacher_ckpt_path, print_exp_summary,
     maybe_clear_dir, ExpPaths,
 )
 
@@ -78,7 +79,8 @@ def _metrics_path(paths: ExpPaths, dim: int, size: Optional[int]) -> Path:
 # ── phase 1: generate latents ─────────────────────────────────────────────────
 
 def generate(dim: int, size: Optional[int],
-             paths: ExpPaths, overwrite: bool) -> None:
+             paths: ExpPaths, overwrite: bool,
+             teacher_ckpt: str = "best_fid") -> None:
     import torch
     from models.diffusion import FlowMatching
     from models.denoiser import load_student, load_teacher
@@ -93,11 +95,11 @@ def generate(dim: int, size: Optional[int],
 
     is_teacher = size is None
     if is_teacher:
-        ckpt_path = paths.ckpt_dir / f"teacher_{dim}.pt"
+        ckpt_path = get_teacher_ckpt_path(paths, dim, teacher_ckpt)
         if not ckpt_path.exists():
             print(f"[generate] [ERROR] {ckpt_path} not found — run step2 first.")
             return
-        print(f"[generate] dim={dim}  model=teacher  device={device}")
+        print(f"[generate] dim={dim}  model=teacher  ckpt={ckpt_path.name}  device={device}")
         model = load_teacher(str(ckpt_path), latent_dim=dim, device=device)
         print(f"  Generating {N_SAMPLES:,} samples with Euler-{EULER_STEPS} …")
     else:
@@ -214,7 +216,8 @@ def decode(dim: int, size: Optional[int],
 # ── phase 3: metrics ──────────────────────────────────────────────────────────
 
 def metrics(dim: int, size: Optional[int],
-            paths: ExpPaths, overwrite: bool) -> None:
+            paths: ExpPaths, overwrite: bool,
+            teacher_ckpt: str = "best_fid") -> None:
     gdir = _gen_dir(paths, dim, size)
     if not gdir.exists():
         print(f"[metrics] [ERROR] {gdir} not found — run --decode first.")
@@ -225,6 +228,7 @@ def metrics(dim: int, size: Optional[int],
         print(f"[metrics] [skip] {out.name} already exists.")
         return
 
+    is_teacher = size is None
     print(f"[metrics] dim={dim}  model={_label(size)}")
     paths.metrics_dir.mkdir(parents=True, exist_ok=True)
 
@@ -238,8 +242,28 @@ def metrics(dim: int, size: Optional[int],
         ae_fid = compute_fid(str(aedir))
         print(f"  AE-FID={ae_fid:.2f}")
 
+    # Resolve checkpoint metadata for teachers
+    ckpt_type_str  = teacher_ckpt if is_teacher else None
+    ckpt_path_str  = None
+    if is_teacher:
+        ckpt_path_str = str(get_teacher_ckpt_path(paths, dim, teacher_ckpt))
+
     with open(out, "w") as fh:
-        json.dump({"fid": fid_val, "is": is_val, "ae_fid": ae_fid}, fh, indent=2)
+        json.dump(
+            {
+                "fid":              fid_val,
+                "is":               is_val,
+                "ae_fid":           ae_fid,
+                "exp_name":         paths.exp_name,
+                "latent_dim":       dim,
+                "model_type":       "teacher" if is_teacher else "student",
+                "n_samples":        None if is_teacher else size,
+                "checkpoint_type":  ckpt_type_str,
+                "checkpoint_path":  ckpt_path_str,
+            },
+            fh,
+            indent=2,
+        )
     print(f"  Saved → {out}")
 
     print_exp_summary(paths, metrics_path=out)
@@ -417,6 +441,7 @@ def main():
     parser.add_argument("--overwrite", action="store_true",
                         help="Delete and regenerate existing output files/directories")
     add_exp_arg(parser)
+    add_teacher_ckpt_arg(parser)
     args = parser.parse_args()
 
     paths = get_paths(args.exp_name)
@@ -435,11 +460,11 @@ def main():
     size = None if args.teacher else args.size
 
     if args.generate:
-        generate(args.dim, size, paths, args.overwrite)
+        generate(args.dim, size, paths, args.overwrite, args.teacher_ckpt)
     elif args.decode:
         decode(args.dim, size, paths, args.overwrite)
     elif args.metrics:
-        metrics(args.dim, size, paths, args.overwrite)
+        metrics(args.dim, size, paths, args.overwrite, args.teacher_ckpt)
 
 
 if __name__ == "__main__":

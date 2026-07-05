@@ -26,7 +26,10 @@ from tqdm import tqdm
 
 from models.diffusion import FlowMatching
 from models.denoiser import load_teacher
-from exp_config import get_paths, add_exp_arg, print_exp_summary, ExpPaths
+from exp_config import (
+    get_paths, add_exp_arg, add_teacher_ckpt_arg,
+    get_teacher_ckpt_path, print_exp_summary, ExpPaths,
+)
 
 LATENT_DIMS     = [64, 128, 256, 384, 512, 1024]
 DATASET_SIZES   = [50_000, 100_000, 150_000, 200_000]
@@ -113,16 +116,18 @@ def generate_trajectories(
 
 
 def generate_for_dim(dim: int, device: torch.device,
-                     paths: ExpPaths, overwrite: bool) -> None:
+                     paths: ExpPaths, overwrite: bool,
+                     teacher_ckpt: str = "best_fid") -> None:
     print(f"\n{'='*60}")
     print(f"Generating synthetic data  latent_dim={dim}  device={device}")
     print(f"{'='*60}")
 
-    teacher_path = paths.ckpt_dir / f"teacher_{dim}.pt"
+    teacher_path = get_teacher_ckpt_path(paths, dim, teacher_ckpt)
     if not teacher_path.exists():
         print(f"[ERROR] {teacher_path} not found — run step2 first.")
         return
 
+    print(f"  Teacher checkpoint : {teacher_path.name}  (--teacher-ckpt={teacher_ckpt})")
     model = load_teacher(str(teacher_path), latent_dim=dim, device=str(device))
     flow  = FlowMatching(device=str(device))
 
@@ -145,6 +150,7 @@ def main():
     parser.add_argument("--overwrite", action="store_true",
                         help="Regenerate even if output files already exist")
     add_exp_arg(parser)
+    add_teacher_ckpt_arg(parser)
     args = parser.parse_args()
 
     paths = get_paths(args.exp_name)
@@ -157,7 +163,7 @@ def main():
 
     dims = [args.dim] if args.dim else LATENT_DIMS
     for dim in dims:
-        generate_for_dim(dim, get_device(dim), paths, args.overwrite)
+        generate_for_dim(dim, get_device(dim), paths, args.overwrite, args.teacher_ckpt)
 
     print("\nStep 3a complete.")
 

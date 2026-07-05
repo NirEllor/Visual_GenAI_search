@@ -127,6 +127,51 @@ def maybe_clear_dir(dirpath: Path, overwrite: bool, label: str = "") -> bool:
     return True
 
 
+def get_teacher_ckpt_path(paths: "ExpPaths", dim: int, ckpt_type: str = "best_fid") -> Path:
+    """
+    Resolve a teacher checkpoint path.
+
+    ckpt_type: "best_fid" | "best_loss" | "latest"
+
+    Resolution order:
+      1. results/<exp_name>/checkpoints/teacher_<dim>_<ckpt_type>.pt  (new scheme)
+      2. results/<exp_name>/checkpoints/teacher_<dim>.pt              (legacy fallback)
+
+    Returns the resolved path even if it does not exist (caller handles the error).
+    """
+    valid = {"best_fid", "best_loss", "latest"}
+    if ckpt_type not in valid:
+        raise ValueError(f"ckpt_type must be one of {valid}, got {ckpt_type!r}")
+
+    new_path = paths.ckpt_dir / f"teacher_{dim}_{ckpt_type}.pt"
+    if new_path.exists():
+        return new_path
+
+    legacy = paths.ckpt_dir / f"teacher_{dim}.pt"
+    if legacy.exists():
+        print(
+            f"  [ckpt] {new_path.name} not found — falling back to legacy "
+            f"{legacy.name}"
+        )
+        return legacy
+
+    return new_path  # doesn't exist; caller emits the error
+
+
+def add_teacher_ckpt_arg(parser) -> None:
+    """Attach --teacher-ckpt to any argparse.ArgumentParser."""
+    parser.add_argument(
+        "--teacher-ckpt",
+        choices=["best_fid", "best_loss", "latest"],
+        default="best_fid",
+        dest="teacher_ckpt",
+        help=(
+            "Which teacher checkpoint to load: best_fid (default), "
+            "best_loss, or latest"
+        ),
+    )
+
+
 def print_exp_summary(
     paths: ExpPaths,
     ckpt_path: Optional[Path] = None,
