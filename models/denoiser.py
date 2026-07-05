@@ -40,6 +40,81 @@ class SinusoidalPosEmb(nn.Module):
         return emb
 
 
+class ResMLPBlock(nn.Module):
+    def __init__(self, dim: int, time_emb_dim: int, dropout: float = 0.0):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.time_proj = nn.Linear(time_emb_dim, 2 * dim)
+        self.net = nn.Sequential(
+            nn.Linear(dim, 4 * dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(4 * dim, dim),
+        )
+
+    def forward(self, x: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
+        scale, shift = self.time_proj(t_emb).chunk(2, dim=-1)
+        h = self.norm(x)
+        h = h * (1 + scale) + shift
+        return x + self.net(h)
+
+
+class MLPTeacherDenoiser(nn.Module):
+    def __init__(
+        self,
+        latent_dim: int,
+        hidden_dim: int = None,
+        n_blocks: int = None,
+        time_emb_dim: int = 256,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.latent_dim = latent_dim
+
+        if hidden_dim is None:
+            if latent_dim <= 128:
+                hidden_dim = 512
+            elif latent_dim <= 512:
+                hidden_dim = 1024
+            else:
+                hidden_dim = 1536
+
+        if n_blocks is None:
+            if latent_dim <= 128:
+                n_blocks = 6
+            elif latent_dim <= 512:
+                n_blocks = 8
+            else:
+                n_blocks = 10
+
+        self.time_embed = nn.Sequential(
+            SinusoidalPosEmb(time_emb_dim),
+            nn.Linear(time_emb_dim, time_emb_dim),
+            nn.GELU(),
+            nn.Linear(time_emb_dim, time_emb_dim),
+        )
+
+        self.input_proj = nn.Linear(latent_dim, hidden_dim)
+
+        self.blocks = nn.ModuleList([
+            ResMLPBlock(hidden_dim, time_emb_dim, dropout=dropout)
+            for _ in range(n_blocks)
+        ])
+
+        self.output_norm = nn.LayerNorm(hidden_dim)
+        self.output_proj = nn.Linear(hidden_dim, latent_dim)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        t_emb = self.time_embed(t * 1000)
+        h = self.input_proj(x)
+
+        for block in self.blocks:
+            h = block(h, t_emb)
+
+        h = self.output_norm(h)
+        return self.output_proj(h)
+
+
 # ── Convolutional residual block with FiLM time conditioning ─────────────────
 
 class ConvResBlock(nn.Module):
@@ -136,21 +211,8 @@ class ConvDenoiser(nn.Module):
 
 # ── Concrete models ───────────────────────────────────────────────────────────
 
-class TeacherDenoiser(ConvDenoiser):
-    """Large teacher: 8 conv residual blocks, hidden_channels scales with latent channels."""
-
-    def __init__(self, latent_dim: int, hidden_channels: int = None, n_blocks: int = 4):
-        if latent_dim % 16 != 0:
-            raise ValueError("latent_dim must be divisible by 16.")
-        latent_channels = latent_dim // 16
-        if hidden_channels is None:
-            hidden_channels = min(512, max(512, latent_channels * 16))
-
-        super().__init__(
-            latent_dim=latent_dim,
-            hidden_channels=hidden_channels,
-            n_blocks=n_blocks,
-        )
+class TeacherDenoiser(MLPTeacherDenoiser):
+    pass
 
 
 class StudentDenoiser(nn.Module):
