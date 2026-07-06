@@ -23,6 +23,7 @@ Usage:
 """
 
 import argparse
+import os
 import shutil
 import numpy as np
 from pathlib import Path
@@ -145,7 +146,7 @@ def eval_teacher_fid(
         print("    [fid-eval] clean-fid not installed — skipping FID eval.")
         return float("inf")
 
-    tmp_dir = paths.ckpt_dir / "_fid_tmp"
+    tmp_dir = paths.ckpt_dir / f"_fid_tmp_dim{dim}_pid{os.getpid()}"
     if tmp_dir.exists():
         shutil.rmtree(str(tmp_dir))
     tmp_dir.mkdir(parents=True, exist_ok=True)
