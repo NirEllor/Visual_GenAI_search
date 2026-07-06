@@ -87,23 +87,34 @@ def _git_hash() -> str:
         return "unknown"
 
 
-def save_config(paths: ExpPaths, extra: Optional[dict] = None) -> None:
+def save_config(paths: ExpPaths, section: str, extra: Optional[dict] = None) -> None:
     """
-    Write results/<exp_name>/config.json at experiment start.
-    Idempotent — existing file is overwritten with latest metadata.
+    Merge `extra` into results/<exp_name>/config.json under cfg[section].
+
+    Each pipeline step owns one section (e.g. "autoencoder", "teacher") so
+    that steps writing at different times — or in parallel, one process per
+    --dim — don't clobber each other's entries. Top-level exp_name/timestamp/
+    git_commit are refreshed on every call.
     """
     paths.exp_dir.mkdir(parents=True, exist_ok=True)
-    cfg: dict = {
-        "exp_name": paths.exp_name,
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "git_commit": _git_hash(),
-    }
-    if extra:
-        cfg.update(extra)
     cfg_path = paths.exp_dir / "config.json"
+
+    cfg: dict = {}
+    if cfg_path.exists():
+        with open(cfg_path) as fh:
+            cfg = json.load(fh)
+
+    cfg["exp_name"] = paths.exp_name
+    cfg["timestamp"] = datetime.now().isoformat(timespec="seconds")
+    cfg["git_commit"] = _git_hash()
+
+    cfg.setdefault(section, {})
+    if extra:
+        cfg[section].update(extra)
+
     with open(cfg_path, "w") as fh:
         json.dump(cfg, fh, indent=2)
-    print(f"  Config saved  → {cfg_path}")
+    print(f"  Config saved  → {cfg_path}  [section: {section}]")
 
 
 def maybe_clear_dir(dirpath: Path, overwrite: bool, label: str = "") -> bool:

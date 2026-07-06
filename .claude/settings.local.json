@@ -12,7 +12,8 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Nir\\\\PycharmProjects\\\\Guided_Research\" -Recurse -Depth 2)",
       "Bash(Select-Object FullName)",
       "PowerShell(git add *)",
-      "PowerShell(git push *)"
+      "PowerShell(git push *)",
+      "Bash(python -m py_compile exp_config.py step0_train_autoencoder.py step2_train_teachers.py)"
     ]
   }
 }

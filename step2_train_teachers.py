@@ -43,7 +43,7 @@ from models.diffusion import FlowMatching
 from models.denoiser import TeacherDenoiser, param_count
 from models.autoencoder import ConvAutoencoder
 
-from exp_config import get_paths, add_exp_arg, print_exp_summary, ExpPaths
+from exp_config import get_paths, add_exp_arg, print_exp_summary, save_config, ExpPaths
 
 LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
 EPOCHS       = 1000
@@ -332,6 +332,8 @@ def main():
 
         print(f"  hparams: epochs={epochs}, batch_size={batch_size}, "
               f"lr={lr}, ema={ema_decay}")
+
+        save_config(paths, section="teacher", extra={str(dim): hp})
 
         # ── load latents ─────────────────────────────────────────────────────
         latents_path = paths.real_latent_dir / f"latents_{dim}.npy"

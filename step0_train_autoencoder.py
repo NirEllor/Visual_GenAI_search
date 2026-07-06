@@ -143,7 +143,7 @@ def main():
 
     paths = get_paths(args.exp_name)
 
-    save_config(paths, extra={
+    save_config(paths, section="autoencoder", extra={
         "model": "ConvAutoencoder",
         "dataset": "CIFAR-10",
         "latent_dims": LATENT_DIMS,
