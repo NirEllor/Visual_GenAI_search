@@ -22,6 +22,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import os
+import json
+import fcntl
+import tempfile
 
 DEFAULT_EXP_NAME = "ae_kl_lpips_only_v1"
 
@@ -88,32 +92,47 @@ def _git_hash() -> str:
 
 
 def save_config(paths: ExpPaths, section: str, extra: Optional[dict] = None) -> None:
-    """
-    Merge `extra` into results/<exp_name>/config.json under cfg[section].
-
-    Each pipeline step owns one section (e.g. "autoencoder", "teacher") so
-    that steps writing at different times — or in parallel, one process per
-    --dim — don't clobber each other's entries. Top-level exp_name/timestamp/
-    git_commit are refreshed on every call.
-    """
     paths.exp_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = paths.exp_dir / "config.json"
+    lock_path = paths.exp_dir / "config.json.lock"
 
-    cfg: dict = {}
-    if cfg_path.exists():
-        with open(cfg_path) as fh:
-            cfg = json.load(fh)
+    with open(lock_path, "w") as lock_fh:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX)
 
-    cfg["exp_name"] = paths.exp_name
-    cfg["timestamp"] = datetime.now().isoformat(timespec="seconds")
-    cfg["git_commit"] = _git_hash()
+        cfg: dict = {}
+        if cfg_path.exists():
+            try:
+                with open(cfg_path) as fh:
+                    cfg = json.load(fh)
+            except json.JSONDecodeError:
+                backup = cfg_path.with_suffix(".broken.json")
+                cfg_path.rename(backup)
+                print(f"  [WARN] Broken config moved → {backup}")
+                cfg = {}
 
-    cfg.setdefault(section, {})
-    if extra:
-        cfg[section].update(extra)
+        cfg["exp_name"] = paths.exp_name
+        cfg["timestamp"] = datetime.now().isoformat(timespec="seconds")
+        cfg["git_commit"] = _git_hash()
 
-    with open(cfg_path, "w") as fh:
-        json.dump(cfg, fh, indent=2)
+        cfg.setdefault(section, {})
+        if extra:
+            cfg[section].update(extra)
+
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(paths.exp_dir),
+            prefix="config.",
+            suffix=".tmp",
+            text=True,
+        )
+
+        with os.fdopen(fd, "w") as fh:
+            json.dump(cfg, fh, indent=2)
+            fh.write("\n")
+
+        os.replace(tmp_name, cfg_path)
+
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+
     print(f"  Config saved  → {cfg_path}  [section: {section}]")
 
 
