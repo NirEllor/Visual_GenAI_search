@@ -27,6 +27,7 @@ import shutil
 import numpy as np
 from pathlib import Path
 from copy import deepcopy
+from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
 
 import torch
 import torch.nn.functional as F
@@ -256,12 +257,15 @@ def plot_teacher_fid(fid_history: list, dim: int, plots_dir: Path) -> None:
 def train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch, ema_decay):
     model.train()
     total_loss = 0.0
-    for batch_idx, (x_0,) in enumerate(loader):
-        x_0 = x_0.to(device)
 
-        x_t, t, v_target = flow.forward(x_0)
-        v_pred = model(x_t, t)
-        loss = F.mse_loss(v_pred, v_target)
+    for batch_idx, (z1,) in enumerate(loader):
+        z1 = z1.to(device)              # real AE latent
+        z0 = torch.randn_like(z1)       # prior noise in same latent dim
+
+        t, zt, ut = flow.sample_location_and_conditional_flow(z0, z1)
+
+        v_pred = model(zt, t)
+        loss = F.mse_loss(v_pred, ut)
 
         optimizer.zero_grad()
         loss.backward()
@@ -270,11 +274,6 @@ def train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch, em
         update_ema(ema_model, model, decay=ema_decay)
 
         total_loss += loss.item()
-
-        if (batch_idx + 1) % LOG_INTERVAL == 0:
-            avg = total_loss / (batch_idx + 1)
-            print(f"    [epoch {epoch:03d}  step {batch_idx+1:04d}]  loss = {avg:.5f}",
-                  flush=True)
 
     return total_loss / len(loader)
 
@@ -308,7 +307,7 @@ def main():
 
     paths.ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    flow = FlowMatching(device=device)
+    flow = ExactOptimalTransportConditionalFlowMatcher(sigma=0.0)
 
     for dim in dims:
         # ── skip check ────────────────────────────────────────────────────────
