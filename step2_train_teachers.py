@@ -27,7 +27,7 @@ import shutil
 import numpy as np
 from pathlib import Path
 from copy import deepcopy
-from torchcfm.conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
+from conditional_flow_matching import ExactOptimalTransportConditionalFlowMatcher
 
 import torch
 import torch.nn.functional as F

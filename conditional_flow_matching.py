@@ -11,7 +11,7 @@ from typing import Union
 
 import torch
 
-from .optimal_transport import OTPlanSampler
+from optimal_transport import OTPlanSampler
 
 
 def pad_t_like_x(t, x):
