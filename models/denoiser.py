@@ -211,8 +211,24 @@ class ConvDenoiser(nn.Module):
 
 # ── Concrete models ───────────────────────────────────────────────────────────
 
-class TeacherDenoiser(MLPTeacherDenoiser):
-    pass
+class TeacherDenoiser(ConvDenoiser):
+    def __init__(self, latent_dim: int):
+        if latent_dim <= 128:
+            hidden_channels = 256
+            n_blocks = 8
+        elif latent_dim <= 512:
+            hidden_channels = 384
+            n_blocks = 10
+        else:
+            hidden_channels = 512
+            n_blocks = 12
+
+        super().__init__(
+            latent_dim=latent_dim,
+            hidden_channels=hidden_channels,
+            n_blocks=n_blocks,
+            time_emb_dim=256,
+        )
 
 
 class StudentDenoiser(nn.Module):

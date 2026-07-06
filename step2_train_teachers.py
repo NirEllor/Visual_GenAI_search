@@ -59,7 +59,7 @@ LOG_INTERVAL = 10
 
 # FID evaluation settings (run every SAVE_EVERY epochs using the frozen AE)
 FID_EVAL_SAMPLES = 5_000
-FID_EULER_STEPS  = 50
+FID_EULER_STEPS  = 100
 FID_DECODE_BATCH = 256
 
 
