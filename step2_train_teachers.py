@@ -283,10 +283,8 @@ def train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch, em
 def get_teacher_hparams(dim: int):
     if dim <= 128:
         return {"epochs": 1000, "batch_size": 256, "lr": 3e-4, "ema_decay": 0.999}
-    elif dim <= 512:
+    else:  # dim > 128 (includes both 256-512 and 1024)
         return {"epochs": 1500, "batch_size": 256, "lr": 2e-4, "ema_decay": 0.999}
-    else:
-        return {"epochs": 2000, "batch_size": 128, "lr": 1e-4, "ema_decay": 0.999}
 
 
 def main():
