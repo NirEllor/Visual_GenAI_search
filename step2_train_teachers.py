@@ -50,8 +50,8 @@ LATENT_DIMS = [64, 128, 256, 384, 512, 1024]
 EPOCHS       = 1000
 BATCH_SIZE   = 256
 LR           = 3e-4
-WEIGHT_DECAY = 1e-4
-GRAD_CLIP    = 1.0
+WEIGHT_DECAY = 1e-5
+GRAD_CLIP    = 5.0
 SAVE_EVERY   = 50
 EMA_DECAY    = 0.9999
 EARLY_STOP_PATIENCE  = 300
@@ -102,6 +102,15 @@ def update_ema(ema_model, model, decay=EMA_DECAY):
     with torch.no_grad():
         for ema_p, p in zip(ema_model.parameters(), model.parameters()):
             ema_p.data.mul_(decay).add_(p.data, alpha=1 - decay)
+
+
+def clip_grad_norm_per_layer(model, max_norm):
+    """Clip gradients per layer instead of globally to prevent large layers from dominating."""
+    torch.nn.utils.clip_grad_norm_(model.time_embed.parameters(), max_norm)
+    torch.nn.utils.clip_grad_norm_(model.input_proj.parameters(), max_norm)
+    for block in model.blocks:
+        torch.nn.utils.clip_grad_norm_(block.parameters(), max_norm)
+    torch.nn.utils.clip_grad_norm_(model.output_head.parameters(), max_norm)
 
 
 def load_ae(dim: int, ckpt_dir: Path, device: str):
@@ -266,7 +275,7 @@ def train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch, em
 
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+        clip_grad_norm_per_layer(model, GRAD_CLIP)
         optimizer.step()
         update_ema(ema_model, model, decay=ema_decay)
 
@@ -280,11 +289,17 @@ def train_one_epoch(model, ema_model, loader, flow, optimizer, device, epoch, em
     return total_loss / len(loader)
 
 
+_TEACHER_HPARAMS = {
+    64:   {"epochs": 1000, "batch_size": 256, "lr": 3.0e-4, "ema_decay": 0.99},
+    128:  {"epochs": 1000, "batch_size": 256, "lr": 3.0e-4, "ema_decay": 0.99},
+    256:  {"epochs": 1500, "batch_size": 256, "lr": 2.2e-4, "ema_decay": 0.99},
+    384:  {"epochs": 1500, "batch_size": 256, "lr": 2.4e-4, "ema_decay": 0.99},
+    512:  {"epochs": 1500, "batch_size": 256, "lr": 2.6e-4, "ema_decay": 0.99},
+    1024: {"epochs": 1500, "batch_size": 256, "lr": 3.2e-4, "ema_decay": 0.99},
+}
+
 def get_teacher_hparams(dim: int):
-    if dim <= 128:
-        return {"epochs": 1000, "batch_size": 256, "lr": 3e-4, "ema_decay": 0.999}
-    else:  # dim > 128 (includes both 256-512 and 1024)
-        return {"epochs": 1500, "batch_size": 256, "lr": 2e-4, "ema_decay": 0.999}
+    return _TEACHER_HPARAMS[dim]
 
 
 def main():
