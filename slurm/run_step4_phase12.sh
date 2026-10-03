@@ -12,7 +12,7 @@ JOB=$(sbatch $DEP_FLAG $NODE_ARGS \
   --mem=40G -c2 --time=1-00 --gres=gpu:1 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=step4_p12_eval \
-  --wrap "bash -c '$RUN python step4_evaluate.py --generate --decode --metrics --plot --exp-name ae_kl_lpips_only_v1_phase12'" \
+  --wrap "bash -c '$RUN python step4_evaluate.py --generate --exp-name ae_kl_lpips_only_v1_phase12; $RUN python step4_evaluate.py --decode --exp-name ae_kl_lpips_only_v1_phase12; $RUN python step4_evaluate.py --metrics --exp-name ae_kl_lpips_only_v1_phase12; $RUN python step4_evaluate.py --plot --exp-name ae_kl_lpips_only_v1_phase12'" \
   | awk '{print $NF}')
 
 echo "  Submitted step4 Phase12 → Job $JOB"
