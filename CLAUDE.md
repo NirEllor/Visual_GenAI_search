@@ -58,7 +58,9 @@ Custom PyTorch `ConvAutoencoder` (`models/autoencoder.py`):
 
 ```
 Guided_Research/
-├── requirements.txt
+├── CLAUDE.md                        # This file
+├── README.md                        # Repository overview
+├── requirements.txt                 # Python dependencies
 ├── data/                            # Auto-downloaded CIFAR-10
 ├── models/
 │   ├── autoencoder.py               # PyTorch ConvAutoencoder
@@ -68,31 +70,81 @@ Guided_Research/
 ├── step0_train_autoencoder.py       # Train 6 ConvAutoencoders from scratch
 ├── step0b_eval_ae.py                # Evaluate AE reconstruction quality
 ├── step1_extract_latents.py         # Encode 50k CIFAR-10 images → latents
-├── step2_train_teachers.py          # Train 6 flow matching teachers
+├── step2_train_teachers.py          # Train 6 flow matching teachers (per-dim hyperparams)
 ├── step3a_generate.py               # Teacher generates synthetic latent trajectories
 ├── step3b_distill.py                # Train 24 students on cached endpoint pairs
 ├── step4_evaluate.py                # Generate images, compute FID/IS, plot
-├── slurm/                           # Cluster job scripts (run_step0.sh, run_step1.sh, ...)
+├── step4_phase12_full.sh            # Comprehensive Step 4 evaluation script (archived)
+│
+├── Analysis & Diagnostic scripts:
+│   ├── analyze_teacher_sampling.py  # Latent distribution statistics and diagnostics
+│   ├── analyze_student_latents.py   # Student latent space analysis
+│   ├── visualize_latents.py         # t-SNE/PCA latent visualization
+│   ├── plot_losses.py               # Training curve plots
+│   ├── gaussian_baseline_decode.py  # Diagonal-Gaussian baseline decoder
+│   ├── sanity_flow.py               # Flow Matching validation on synthetic Gaussians
+│   └── dry_run.py                   # Quick pipeline test
+│
+├── Model extensions (legacy):
+│   ├── conditional_flow_matching.py
+│   └── optimal_transport.py
+│
+├── slurm/
+│   ├── config.sh                    # SLURM configuration
+│   ├── run_step0.sh, run_step1.sh   # Steps 0–1 (autoencoder, extract latents)
+│   ├── run_step2.sh                 # Step 2 (train teachers, default hyperparams)
+│   ├── run_step3a.sh, run_step3b.sh # Steps 3a–3b (generate, distill)
+│   ├── run_step4.sh                 # Step 4 (evaluate)
+│   ├── run_analyze_teacher_sampling.sh   # Run diagnostics
+│   ├── run_analyze_student_latents.sh
+│   └── run_gaussian_baseline.sh     # Baseline evaluation
+│
 ├── results/
-│   ├── ae_kl_lpips_only_v1/         # Default experiment output (--exp-name controls this)
-│   │   ├── checkpoints/             # ae_{dim}.pt, teacher_{dim}_{best_fid,best_loss,latest}.pt, student_{dim}_{n}.pt
+│   ├── ae_kl_lpips_only_v1/         # Configuration A results (original hyperparams)
+│   │   ├── checkpoints/             # ae_{dim}.pt, teacher_*, student_*
 │   │   ├── latents/
 │   │   │   ├── real/                # latents_{dim}.npy, latents_{dim}_norm_stats.npy
-│   │   │   ├── teacher/dim_{dim}/   # synthetic_{dim}_{n}.npy, trajectories_{dim}.npy, paired_endpoints_{dim}.npz
+│   │   │   ├── teacher/dim_{dim}/   # synthetic_*, trajectories_*, paired_endpoints_*
 │   │   │   └── student/             # student eval latents (step4)
 │   │   ├── ae_recon/dim_{dim}/      # AE encode→decode reconstructions
 │   │   ├── generated/{teacher,student}/dim_{dim}[/n_{size}]/  # PNG images
 │   │   ├── metrics/                 # metrics_{dim}_{n}.json, metrics_all.json
-│   │   ├── plots/                   # fid_vs_size.png, fid_vs_dim.png, student_loss_*.png
+│   │   ├── plots/                   # fid_vs_size.png, fid_vs_dim.png, loss curves
 │   │   └── config.json              # git hash, timestamp, hyperparams
-│   └── trained_AE/                  # Legacy results directory
-└── (empty/vestigial top-level dirs: checkpoints/, latents/, synthetic/)
+│   │
+│   ├── ae_kl_lpips_only_v1_phase12/ # Configuration B results (revised hyperparams)
+│   │   └── [same structure as ae_kl_lpips_only_v1/]
+│   │
+│   ├── teacher_latent_analysis/     # Diagnostic outputs from analyze_teacher_sampling.py
+│   │   ├── norm_hist_dim_*.png      # Latent norm distribution histograms
+│   │   ├── pca_spectrum_dim_*.png   # PCA spectrum per dimension
+│   │   ├── tsne_real_vs_*.png       # t-SNE: real vs. generated latents
+│   │   └── teacher_latent_distribution_summary.json
+│   │
+│   └── trained_AE/                  # Legacy results (archive)
+│
+├── docs/
+│   ├── architecture.txt             # Model architecture summary
+│   ├── RESET_PIPELINE.md            # How to reset/clean pipeline
+│   └── Dockerfile, .dockerignore    # Containerization
+│
+└── (empty/vestigial: checkpoints/, latents/, synthetic/)
 ```
 
-Also at top level: `conditional_flow_matching.py`, `optimal_transport.py` (model extensions);
-`analyze_teacher_sampling.py`, `analyze_student_latents.py`, `visualize_latents.py`,
-`plot_losses.py`, `dry_run.py`, `sanity_flow.py`, `gaussian_baseline_decode.py` (analysis scripts);
-`architecture.txt`, `RESET_PIPELINE.md`, `Dockerfile`, `.dockerignore` (docs/config).
+### Experiments Configuration
+
+Two training configurations are managed via `--exp-name` flag:
+
+| Configuration | Flag | Hyperparameters | Results Directory |
+|---|---|---|---|
+| A (original) | `ae_kl_lpips_only_v1` | weight_decay=1e-4, grad_clip=1.0 global, EMA=0.9999, fixed LR tiers | `results/ae_kl_lpips_only_v1/` |
+| B (revised) | `ae_kl_lpips_only_v1_phase12` | weight_decay=1e-5, grad_clip=5.0 per-layer, EMA=0.99, per-dim LR | `results/ae_kl_lpips_only_v1_phase12/` |
+
+The `--exp-name` flag is used in steps 2–4 to select which configuration's checkpoints and results to use:
+```bash
+python step2_train_teachers.py --exp-name ae_kl_lpips_only_v1          # Config A
+python step2_train_teachers.py --exp-name ae_kl_lpips_only_v1_phase12  # Config B
+```
 
 ### Pipeline Steps
 
@@ -113,12 +165,16 @@ Also at top level: `conditional_flow_matching.py`, `optimal_transport.py` (model
 
 **Step 2 — `step2_train_teachers.py`**
 - Normalise latents to zero-mean unit-variance → saves `results/<exp_name>/latents/real/latents_{dim}_norm_stats.npy`
-- Train a flow matching `TeacherDenoiser` (ConvDenoiser with FiLM time conditioning) on normalised latents; hyperparams scale per dim tier:
-  - dim ≤ 128: 1000 epochs, lr=3e-4, batch_size=256
-  - dim ≤ 512: 1500 epochs, lr=2e-4, batch_size=256
-  - dim=1024: 2000 epochs, lr=1e-4, batch_size=128
-- AdamW weight_decay=1e-4, cosine LR decay, grad_clip=1.0, EMA (decay=0.999, note: not 0.9999)
+- Train a flow matching `TeacherDenoiser` (ConvDenoiser with FiLM time conditioning) on normalised latents; hyperparams per dimension:
+  - dim 64: 1000 epochs, lr=3.0e-4, batch_size=256
+  - dim 128: 1000 epochs, lr=3.0e-4, batch_size=256
+  - dim 256: 1500 epochs, lr=2.2e-4, batch_size=256
+  - dim 384: 1500 epochs, lr=2.4e-4, batch_size=256
+  - dim 512: 1500 epochs, lr=2.6e-4, batch_size=256
+  - dim 1024: 1500 epochs, lr=3.2e-4, batch_size=256
+- AdamW weight_decay=1e-5, cosine LR decay, grad_clip=5.0 (per-layer), EMA (decay=0.99)
 - Periodic clean-fid eval every 50 epochs against CIFAR-10 train; early stopping patience=300
+- Per-layer gradient clipping: independent norm clipping for time_embed, input_proj, each ConvResBlock, output_head
 - Save three checkpoints per dim: `results/<exp_name>/checkpoints/teacher_{dim}_{best_fid,best_loss,latest}.pt` (or legacy fallback `teacher_{dim}.pt`)
 
 **Step 3a — `step3a_generate.py`**
@@ -200,8 +256,12 @@ wait
 **TeacherDenoiser** (conv-based, operates on (C,4,4) spatial maps):
 - Processes latent as (C,4,4) where C=latent_dim//16, applies ConvResBlocks with FiLM time conditioning
 - Time embedding: sinusoidal(dim=256) → 2-layer MLP → per-block FiLM (scale/shift via Linear(256→2*channels))
-- Blocks scale per dim tier: dim≤128 → 8 blocks, hidden=256; dim≤512 → 10 blocks, hidden=384; else → 12 blocks, hidden=512
+- Blocks scale per dimension:
+  - dim ≤ 128: 8 blocks, hidden_channels=256
+  - dim ≤ 512: 10 blocks, hidden_channels=384
+  - dim = 1024: 12 blocks, hidden_channels=512
 - Each ConvResBlock: GroupNorm → Conv3×3 → FiLM scale/shift → GELU → GroupNorm → Conv3×3 → residual add
+- **Gradient clipping (Configuration B only):** Per-layer independent clipping via `clip_grad_norm_per_layer()` applied to time_embed, input_proj, each block in blocks list, and output_head separately (vs. global clipping in Configuration A)
 
 **StudentDenoiser** (untimed conv, no time conditioning):
 - Same spatial processing (C,4,4), but blocks ignore time argument `t` entirely
