@@ -1,0 +1,72 @@
+{
+  "ae": {},
+  "teacher": {
+    "64": {
+      "fid": 40.298884157152315,
+      "is": 6.358256586737696,
+      "ae_fid": 36.507181301545984,
+      "exp_name": "ae_kl_lpips_only_v1_phase12",
+      "latent_dim": 64,
+      "model_type": "teacher",
+      "n_samples": null,
+      "checkpoint_type": "best_fid",
+      "checkpoint_path": "results/ae_kl_lpips_only_v1_phase12/checkpoints/teacher_64_best_fid.pt"
+    },
+    "128": {
+      "fid": 38.86587274195051,
+      "is": 6.57934993704851,
+      "ae_fid": 30.18002527460959,
+      "exp_name": "ae_kl_lpips_only_v1_phase12",
+      "latent_dim": 128,
+      "model_type": "teacher",
+      "n_samples": null,
+      "checkpoint_type": "best_fid",
+      "checkpoint_path": "results/ae_kl_lpips_only_v1_phase12/checkpoints/teacher_128_best_fid.pt"
+    },
+    "256": {
+      "fid": 39.22042901459491,
+      "is": 6.518364245173464,
+      "ae_fid": 20.621243566290218,
+      "exp_name": "ae_kl_lpips_only_v1_phase12",
+      "latent_dim": 256,
+      "model_type": "teacher",
+      "n_samples": null,
+      "checkpoint_type": "best_fid",
+      "checkpoint_path": "results/ae_kl_lpips_only_v1_phase12/checkpoints/teacher_256_best_fid.pt"
+    },
+    "384": {
+      "fid": 40.89799675240414,
+      "is": 6.606408264187531,
+      "ae_fid": 14.767409619222178,
+      "exp_name": "ae_kl_lpips_only_v1_phase12",
+      "latent_dim": 384,
+      "model_type": "teacher",
+      "n_samples": null,
+      "checkpoint_type": "best_fid",
+      "checkpoint_path": "results/ae_kl_lpips_only_v1_phase12/checkpoints/teacher_384_best_fid.pt"
+    },
+    "512": {
+      "fid": 43.76366836677465,
+      "is": 6.245506515539928,
+      "ae_fid": 10.41098623524897,
+      "exp_name": "ae_kl_lpips_only_v1_phase12",
+      "latent_dim": 512,
+      "model_type": "teacher",
+      "n_samples": null,
+      "checkpoint_type": "best_fid",
+      "checkpoint_path": "results/ae_kl_lpips_only_v1_phase12/checkpoints/teacher_512_best_fid.pt"
+    },
+    "1024": {
+      "fid": 51.77932306672574,
+      "is": 6.030479544208483,
+      "ae_fid": 4.318701044536908,
+      "exp_name": "ae_kl_lpips_only_v1_phase12",
+      "latent_dim": 1024,
+      "model_type": "teacher",
+      "n_samples": null,
+      "checkpoint_type": "best_fid",
+      "checkpoint_path": "results/ae_kl_lpips_only_v1_phase12/checkpoints/teacher_1024_best_fid.pt"
+    }
+  },
+  "student": {}
+}

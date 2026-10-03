@@ -1,0 +1,11 @@
+{
+  "fid": 38.86587274195051,
+  "is": 6.57934993704851,
+  "ae_fid": 30.18002527460959,
+  "exp_name": "ae_kl_lpips_only_v1_phase12",
+  "latent_dim": 128,
+  "model_type": "teacher",
+  "n_samples": null,
+  "checkpoint_type": "best_fid",
+  "checkpoint_path": "results/ae_kl_lpips_only_v1_phase12/checkpoints/teacher_128_best_fid.pt"
+}
