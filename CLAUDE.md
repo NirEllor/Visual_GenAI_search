@@ -74,7 +74,7 @@ Guided_Research/
 ├── step3a_generate.py               # Teacher generates synthetic latent trajectories
 ├── step3b_distill.py                # Train 24 students on cached endpoint pairs
 ├── step4_evaluate.py                # Generate images, compute FID/IS, plot
-├── step4_phase12_full.sh            # Comprehensive Step 4 evaluation script (archived)
+├── step4_phase12_full.sh            # Step 4 evaluation for the Config B teachers (generate/decode/metrics/plot)
 │
 ├── Analysis & Diagnostic scripts:
 │   ├── analyze_teacher_sampling.py  # Latent distribution statistics and diagnostics
@@ -123,10 +123,9 @@ Guided_Research/
 │   │
 │   └── trained_AE/                  # Legacy results (archive)
 │
-├── docs/
-│   ├── architecture.txt             # Model architecture summary
-│   ├── RESET_PIPELINE.md            # How to reset/clean pipeline
-│   └── Dockerfile, .dockerignore    # Containerization
+├── architecture.txt                 # Model architecture summary
+├── RESET_PIPELINE.md                # How to reset/clean pipeline
+├── Dockerfile, .dockerignore        # Containerization
 │
 └── (empty/vestigial: checkpoints/, latents/, synthetic/)
 ```
@@ -137,8 +136,10 @@ Two training configurations are managed via `--exp-name` flag:
 
 | Configuration | Flag | Hyperparameters | Results Directory |
 |---|---|---|---|
-| A (original) | `ae_kl_lpips_only_v1` | weight_decay=1e-4, grad_clip=1.0 global, EMA=0.9999, fixed LR tiers | `results/ae_kl_lpips_only_v1/` |
+| A (original) | `ae_kl_lpips_only_v1` | weight_decay=1e-4, grad_clip=1.0 global, EMA=0.999, LR 3e-4 (dim ≤128) / 2e-4 (dim ≥256) | `results/ae_kl_lpips_only_v1/` |
 | B (revised) | `ae_kl_lpips_only_v1_phase12` | weight_decay=1e-5, grad_clip=5.0 per-layer, EMA=0.99, per-dim LR | `results/ae_kl_lpips_only_v1_phase12/` |
+
+The current `step2_train_teachers.py` implements Configuration B. To reproduce Configuration A, use the version from commit `b20dcfc^` (`git show b20dcfc^:step2_train_teachers.py`).
 
 The `--exp-name` flag is used in steps 2–4 to select which configuration's checkpoints and results to use:
 ```bash
@@ -156,7 +157,7 @@ python step2_train_teachers.py --exp-name ae_kl_lpips_only_v1_phase12  # Config 
 
 **Step 0b — `step0b_eval_ae.py`**
 - Evaluate AE reconstruction quality (FID, visual samples)
-- Results: `results/ae_eval/`
+- Results: `results/<exp_name>/ae_recon/dim_{dim}/` (reconstructions), `results/<exp_name>/plots/ae_grid_{dim}.png`, `results/<exp_name>/metrics/ae_metrics_{dim}.json`
 
 **Step 1 — `step1_extract_latents.py`**
 - Load each trained `ConvAutoencoder` from `results/<exp_name>/checkpoints/ae_{dim}.pt`
