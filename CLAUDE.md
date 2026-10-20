@@ -74,7 +74,6 @@ Guided_Research/
 ├── step3a_generate.py               # Teacher generates synthetic latent trajectories
 ├── step3b_distill.py                # Train 24 students on cached endpoint pairs
 ├── step4_evaluate.py                # Generate images, compute FID/IS, plot
-├── step4_phase12_full.sh            # Step 4 evaluation for the Config B teachers (generate/decode/metrics/plot)
 │
 ├── Analysis & Diagnostic scripts:
 │   ├── analyze_teacher_sampling.py  # Latent distribution statistics and diagnostics
@@ -92,7 +91,7 @@ Guided_Research/
 ├── slurm/
 │   ├── config.sh                    # SLURM configuration
 │   ├── run_step0.sh, run_step1.sh   # Steps 0–1 (autoencoder, extract latents)
-│   ├── run_step2.sh                 # Step 2 (train teachers, default hyperparams)
+│   ├── run_step2.sh                 # Step 2 (train teachers)
 │   ├── run_step3a.sh, run_step3b.sh # Steps 3a–3b (generate, distill)
 │   ├── run_step4.sh                 # Step 4 (evaluate)
 │   ├── run_analyze_teacher_sampling.sh   # Run diagnostics
@@ -100,7 +99,7 @@ Guided_Research/
 │   └── run_gaussian_baseline.sh     # Baseline evaluation
 │
 ├── results/
-│   ├── ae_kl_lpips_only_v1/         # Configuration A results (original hyperparams)
+│   ├── ae_kl_lpips_only_v1/         # Experiment results (default --exp-name)
 │   │   ├── checkpoints/             # ae_{dim}.pt, teacher_*, student_*
 │   │   ├── latents/
 │   │   │   ├── real/                # latents_{dim}.npy, latents_{dim}_norm_stats.npy
@@ -111,9 +110,6 @@ Guided_Research/
 │   │   ├── metrics/                 # metrics_{dim}_{n}.json, metrics_all.json
 │   │   ├── plots/                   # fid_vs_size.png, fid_vs_dim.png, loss curves
 │   │   └── config.json              # git hash, timestamp, hyperparams
-│   │
-│   ├── ae_kl_lpips_only_v1_phase12/ # Configuration B results (revised hyperparams)
-│   │   └── [same structure as ae_kl_lpips_only_v1/]
 │   │
 │   ├── teacher_latent_analysis/     # Diagnostic outputs from analyze_teacher_sampling.py
 │   │   ├── norm_hist_dim_*.png      # Latent norm distribution histograms
@@ -130,22 +126,11 @@ Guided_Research/
 └── (empty/vestigial: checkpoints/, latents/, synthetic/)
 ```
 
-### Experiments Configuration
+### Experiments
 
-Two training configurations are managed via `--exp-name` flag:
+The `--exp-name` flag (default `ae_kl_lpips_only_v1`) selects where checkpoints and results are written in steps 0–4.
 
-| Configuration | Flag | Hyperparameters | Results Directory |
-|---|---|---|---|
-| A (original) | `ae_kl_lpips_only_v1` | weight_decay=1e-4, grad_clip=1.0 global, EMA=0.999, LR 3e-4 (dim ≤128) / 2e-4 (dim ≥256) | `results/ae_kl_lpips_only_v1/` |
-| B (revised) | `ae_kl_lpips_only_v1_phase12` | weight_decay=1e-5, grad_clip=5.0 per-layer, EMA=0.99, per-dim LR | `results/ae_kl_lpips_only_v1_phase12/` |
-
-The current `step2_train_teachers.py` implements Configuration B. To reproduce Configuration A, use the version from commit `b20dcfc^` (`git show b20dcfc^:step2_train_teachers.py`).
-
-The `--exp-name` flag is used in steps 2–4 to select which configuration's checkpoints and results to use:
-```bash
-python step2_train_teachers.py --exp-name ae_kl_lpips_only_v1          # Config A
-python step2_train_teachers.py --exp-name ae_kl_lpips_only_v1_phase12  # Config B
-```
+The teacher results reported in `results/latent_dimension_fid_report.md` were produced by the earlier `step2_train_teachers.py` (weight_decay=1e-4, global grad clip 1.0, EMA=0.999, LR 3e-4 for dim ≤128 and 2e-4 otherwise). Recover it with `git show b20dcfc^:step2_train_teachers.py`. The current `step2_train_teachers.py` uses the revised settings described in the Step 2 section below.
 
 ### Pipeline Steps
 
@@ -262,7 +247,7 @@ wait
   - dim ≤ 512: 10 blocks, hidden_channels=384
   - dim = 1024: 12 blocks, hidden_channels=512
 - Each ConvResBlock: GroupNorm → Conv3×3 → FiLM scale/shift → GELU → GroupNorm → Conv3×3 → residual add
-- **Gradient clipping (Configuration B only):** Per-layer independent clipping via `clip_grad_norm_per_layer()` applied to time_embed, input_proj, each block in blocks list, and output_head separately (vs. global clipping in Configuration A)
+- **Gradient clipping:** per-layer independent clipping via `clip_grad_norm_per_layer()` applied to time_embed, input_proj, each block in blocks list, and output_head separately
 
 **StudentDenoiser** (untimed conv, no time conditioning):
 - Same spatial processing (C,4,4), but blocks ignore time argument `t` entirely
