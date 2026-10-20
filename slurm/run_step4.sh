@@ -2,12 +2,15 @@
 # Step 4 — Evaluate all 30 models (24 students + 6 teachers).
 # Internally chains 4 phases: generate → decode → metrics → plot.
 # Usage:
-#   bash slurm/run_step4.sh                        # no dependency
+#   bash slurm/run_step4.sh                        # no dependency, default experiment
+#   EXP_NAME=ae_kl_lpips_only_v1_phase12 bash slurm/run_step4.sh
 #   bash slurm/run_step4.sh afterok:JID1:JID2:...  # with prior dependency
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/config.sh"
 cd "$(dirname "$SCRIPT_DIR")"
+
+EXP_NAME="${EXP_NAME:-ae_kl_lpips_only_v1}"
 
 DEP_FLAG=""
 [ -n "${1:-}" ] && DEP_FLAG="--dependency=$1"
@@ -22,7 +25,7 @@ for DIM in "${DIMS[@]}"; do
       --mem=30G -c2 --time=2:00:00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_gen_d${DIM}_n${SIZE} \
-      --wrap "bash -c '$RUN python step4_evaluate.py --generate --dim $DIM --size $SIZE'" \
+      --wrap "bash -c '$RUN python step4_evaluate.py --exp-name $EXP_NAME --generate --dim $DIM --size $SIZE'" \
       | awk '{print $NF}')
     GEN_IDS+=($JOB)
   done
@@ -31,7 +34,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=30G -c2 --time=2:00:00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_gen_tea_d${DIM} \
-    --wrap "bash -c '$RUN python step4_evaluate.py --generate --teacher --dim $DIM'" \
+    --wrap "bash -c '$RUN python step4_evaluate.py --exp-name $EXP_NAME --generate --teacher --dim $DIM'" \
     | awk '{print $NF}')
   GEN_IDS+=($JOB)
 done
@@ -49,7 +52,7 @@ for DIM in "${DIMS[@]}"; do
       --mem=30G -c2 --time=2:00:00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_dec_d${DIM}_n${SIZE} \
-      --wrap "bash -c '$RUN python step4_evaluate.py --decode --dim $DIM --size $SIZE'" \
+      --wrap "bash -c '$RUN python step4_evaluate.py --exp-name $EXP_NAME --decode --dim $DIM --size $SIZE'" \
       | awk '{print $NF}')
     DEC_IDS+=($JOB)
   done
@@ -58,7 +61,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=30G -c2 --time=2:00:00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_dec_tea_d${DIM} \
-    --wrap "bash -c '$RUN python step4_evaluate.py --decode --teacher --dim $DIM'" \
+    --wrap "bash -c '$RUN python step4_evaluate.py --exp-name $EXP_NAME --decode --teacher --dim $DIM'" \
     | awk '{print $NF}')
   DEC_IDS+=($JOB)
 done
@@ -76,7 +79,7 @@ for DIM in "${DIMS[@]}"; do
       --mem=40G -c2 --time=2:00:00 --gres=gpu:1 \
       --mail-type=FAIL,END --mail-user="$EMAIL" \
       --job-name=s4_met_d${DIM}_n${SIZE} \
-      --wrap "bash -c '$RUN python step4_evaluate.py --metrics --dim $DIM --size $SIZE'" \
+      --wrap "bash -c '$RUN python step4_evaluate.py --exp-name $EXP_NAME --metrics --dim $DIM --size $SIZE'" \
       | awk '{print $NF}')
     MET_IDS+=($JOB)
   done
@@ -85,7 +88,7 @@ for DIM in "${DIMS[@]}"; do
     --mem=40G -c2 --time=2:00:00 --gres=gpu:1 \
     --mail-type=FAIL,END --mail-user="$EMAIL" \
     --job-name=s4_met_tea_d${DIM} \
-    --wrap "bash -c '$RUN python step4_evaluate.py --metrics --teacher --dim $DIM'" \
+    --wrap "bash -c '$RUN python step4_evaluate.py --exp-name $EXP_NAME --metrics --teacher --dim $DIM'" \
     | awk '{print $NF}')
   MET_IDS+=($JOB)
 done
@@ -98,7 +101,7 @@ JOB_PLOT=$(sbatch --dependency="$MET_DEP" $NODE_ARGS \
   --mem=8G -c1 --time=2:00:00 --gres=gpu:0 \
   --mail-type=ALL --mail-user="$EMAIL" \
   --job-name=step4_plot \
-  --wrap "bash -c '$RUN python step4_evaluate.py --plot'" \
+  --wrap "bash -c '$RUN python step4_evaluate.py --exp-name $EXP_NAME --plot'" \
   | awk '{print $NF}')
 echo "  Submitted step4 plot → Job $JOB_PLOT"
 
